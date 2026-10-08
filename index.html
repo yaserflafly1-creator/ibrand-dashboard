@@ -259,7 +259,7 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
     </div>
   </section>
 
-  <footer>بيانات حقيقية من متجر اي براند على سلة · تتحدث تلقائياً · أسماء العملاء مختصرة لحماية خصوصيتهم</footer>
+  <footer>بيانات حقيقية من متجر اي براند على سلة · المبيعات شاملة التخفيضات مثل صفحة التقارير في سلة · تتحدث تلقائياً · أسماء العملاء مختصرة لحماية خصوصيتهم</footer>
 </div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -539,7 +539,8 @@ async function load(first){
     const d = await res.json();
     if(!first && DATA && d.updated_at===DATA.updated_at){ renderUpdated(); return; }
     DATA = d;
-    DAILY = d.daily.map(([d,o,s,c]) => ({d,o,s,c}));
+    const P = d.pending || {};   // طلبات بانتظار المراجعة وقيد التنفيذ (تحسبها تقارير سلة)
+    DAILY = d.daily.map(([day,o,s,c]) => { const p = P[day] || [0,0]; return {d:day, o:o+p[0], s:s+p[1], c:c+p[0]}; });
     TODAY = parseYmd(DAILY[DAILY.length-1].d);
     $('#from').max = $('#to').max = ymd(TODAY);
     $('#from').min = $('#to').min = DAILY[0].d;

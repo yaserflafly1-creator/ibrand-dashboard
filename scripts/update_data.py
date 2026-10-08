@@ -11,8 +11,15 @@ snapshot.json {
   "status_30d": {"completed":N,"processing":N,"canceled":N,"returned":N},
   "top": {"week"|"month"|"d30"|"year": [[name, qty, image_url], ...]},
   "recent": [[ref, first_name, last_name, city, "YYYY-MM-DD HH:MM",
-              status_name, status_slug, total], ...]
+              status_name, status_slug, total], ...],
+  "pending_from": "YYYY-MM-DD",
+  "pending": [["YYYY-MM-DD", total], ...]
 }
+"pending" = every order created on/after pending_from whose status is
+"بإنتظار المراجعة" (customized id 1658685111) or "قيد التنفيذ" (1018865072).
+Salla's reports page counts these on top of the completed orders that the
+daily report returns, so the page adds them to each day. The list replaces
+all pending days from pending_from onward.
 Customer names are reduced to first name + last-name initial before saving,
 because the published page is public.
 """
@@ -71,6 +78,14 @@ def main():
                 "date": r[4], "status": r[5], "group": STATUS_GROUP.get(r[6], "processing"),
                 "total": round(float(r[7]), 2),
             } for r in snap["recent"][:15]]
+
+        if "pending" in snap and snap.get("pending_from"):
+            start = snap["pending_from"]
+            pend = {d: v for d, v in data.get("pending", {}).items() if d < start}
+            for d, amt in snap["pending"]:
+                c, s = pend.get(d, [0, 0])
+                pend[d] = [c + 1, round(s + float(amt), 2)]
+            data["pending"] = dict(sorted(pend.items()))
 
     if not data.get("daily"):
         sys.exit("no daily data — refusing to write an empty data.json")
