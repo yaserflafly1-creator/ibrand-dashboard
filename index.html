@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>لوحة المبيعات | iBrand</title>
+<title>لوحة مبيعات اي براند</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -98,6 +98,7 @@ button{cursor:pointer}
 
 /* Tables */
 .grid-bottom{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+.grid-charts>*,.grid-bottom>*{min-width:0}
 .tbl-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;min-width:560px}
 thead th{background:linear-gradient(90deg,var(--pink-50),var(--pink-100));color:var(--pink-700);font-weight:600;font-size:.8rem;text-align:start;padding:11px 14px;white-space:nowrap}
@@ -110,11 +111,18 @@ tbody tr:hover{background:var(--pink-50)}
 .b-completed{background:var(--green-bg);color:var(--green)}
 .b-shipping{background:var(--amber-bg);color:var(--amber)}
 .b-canceled{background:var(--red-bg);color:var(--red)}
-.b-refunded{background:#ede9fe;color:#7c3aed}
+.b-returned{background:#ede9fe;color:#7c3aed}
+.b-processing{background:var(--amber-bg);color:var(--amber)}
+.live{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:7px 14px;font-size:.8rem;color:var(--muted);box-shadow:var(--shadow)}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(22,163,74,.5);animation:pulse 2s infinite}
+.live.stale .pulse{background:var(--amber);animation:none}
+@keyframes pulse{70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
+.pimg img{width:100%;height:100%;object-fit:contain;border-radius:12px;background:#fff}
+.loading{padding:60px 16px;text-align:center;color:var(--muted)}
 .empty{padding:28px;text-align:center;color:var(--muted);font-size:.9rem}
 .search{max-width:220px}
 
-.top-list{list-style:none;display:grid;gap:10px}
+.top-list{list-style:none;display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
 .top-list li{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:16px;transition:.2s}
 .top-list li:hover{border-color:var(--pink-200);background:var(--pink-50);transform:translateX(-2px)}
 .pimg{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:1.4rem;background:linear-gradient(135deg,var(--pink-100),var(--pink-200));flex:none}
@@ -161,17 +169,18 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
       </div>
       <div>
-        <h1>لوحة المبيعات</h1>
+        <h1>لوحة مبيعات اي براند</h1>
         <p id="greet">نظرة شاملة على أداء متجرك</p>
       </div>
     </div>
-    <div class="avatar" aria-hidden="true">م</div>
+    <div class="live" id="live"><span class="pulse"></span><span id="updated">جارٍ تحميل البيانات…</span></div>
   </header>
 
   <!-- Filter bar -->
   <section class="filters" aria-label="تصفية البيانات">
     <div class="seg" id="quick" role="group" aria-label="تصفية سريعة">
       <button data-p="today">اليوم</button>
+      <button data-p="week">الأسبوع</button>
       <button data-p="month" class="on">هذا الشهر</button>
       <button data-p="year">هذه السنة</button>
     </div>
@@ -182,6 +191,7 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
         <option value="today">مبيعات اليوم</option>
         <option value="week">مبيعات الأسبوع</option>
         <option value="month" selected>مبيعات الشهر</option>
+        <option value="d30">آخر 30 يوم</option>
         <option value="year">مبيعات السنة</option>
         <option value="custom">نطاق مخصص…</option>
       </select>
@@ -217,7 +227,7 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
       <div class="chart-box"><canvas id="trend" dir="ltr"></canvas></div>
     </div>
     <div class="card panel">
-      <div class="panel-h"><div><h2>حالات الطلبات</h2><p>توزيع الطلبات خلال الفترة</p></div></div>
+      <div class="panel-h"><div><h2>حالات الطلبات</h2><p>آخر 30 يوم</p></div></div>
       <div class="donut-box">
         <canvas id="status"></canvas>
         <div class="donut-center"><b id="donutTotal">0</b><span>طلب</span></div>
@@ -230,7 +240,7 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
   <section class="grid-bottom">
     <div class="card panel">
       <div class="panel-h">
-        <div><h2>أحدث الطلبات</h2><p id="ordersCount"></p></div>
+        <div><h2>أحدث الطلبات</h2><p id="ordersCount">آخر 15 طلب في المتجر</p></div>
         <div class="field search">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input id="search" type="search" placeholder="ابحث برقم الطلب أو العميل" aria-label="بحث في الطلبات">
@@ -238,69 +248,26 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
       </div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>رقم الطلب</th><th>العميل</th><th>التاريخ</th><th>الحالة</th><th>الإجمالي</th></tr></thead>
+          <thead><tr><th>رقم الطلب</th><th>العميل</th><th>المدينة</th><th>التاريخ</th><th>الحالة</th><th>الإجمالي</th></tr></thead>
           <tbody id="orders"></tbody>
         </table>
       </div>
     </div>
     <div class="card panel">
-      <div class="panel-h"><div><h2>الأكثر مبيعاً</h2><p>أسرع 5 منتجات حركة</p></div></div>
+      <div class="panel-h"><div><h2>الأكثر مبيعاً</h2><p id="topNote">حسب عدد القطع المباعة</p></div></div>
       <ul class="top-list" id="top"></ul>
     </div>
   </section>
 
-  <footer>بيانات تجريبية لأغراض العرض · يتم تحديث كل المؤشرات تلقائياً عند تغيير الفترة</footer>
+  <footer>بيانات حقيقية من متجر اي براند على سلة · تتحدث تلقائياً · أسماء العملاء مختصرة لحماية خصوصيتهم</footer>
 </div>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
-/* ============ Mock data (deterministic) ============ */
+/* ============ Data (data.json يتحدث تلقائياً من متجر سلة) ============ */
 const CURRENCY = 'ر.س';
-const PRODUCTS = [
-  {n:'عطر الورد الفاخر', i:'🌸', p:289},
-  {n:'حقيبة يد جلدية', i:'👜', p:459},
-  {n:'ساعة ذكية برو', i:'⌚', p:799},
-  {n:'سماعات لاسلكية', i:'🎧', p:349},
-  {n:'حذاء رياضي خفيف', i:'👟', p:395},
-  {n:'كريم عناية بالبشرة', i:'🧴', p:129},
-  {n:'نظارة شمسية', i:'🕶️', p:219},
-  {n:'وشاح حرير', i:'🧣', p:159}
-];
-const WEIGHTS = [16,10,6,13,9,22,8,16];
-const NAMES = ['سارة العتيبي','محمد القحطاني','نورة الدوسري','عبدالله الشمري','ريم الحربي','فهد المطيري','لينا الزهراني','خالد السبيعي','هند الغامدي','يوسف العنزي','أمل الشهري','تركي البقمي','جود المالكي','سلطان العمري','دانة الراشد','ماجد الحازمي'];
 const DAY = 864e5;
-function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
-function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x}
-function endOfDay(d){const x=new Date(d);x.setHours(23,59,59,999);return x}
-
-const TODAY = startOfDay(new Date());
-const ORDERS = (function(){
-  const r = rng(20240607), out = [], total = WEIGHTS.reduce((a,b)=>a+b,0);
-  const pick = () => {let x = r()*total; for(let i=0;i<WEIGHTS.length;i++){x-=WEIGHTS[i]; if(x<0) return i} return 0};
-  const SPAN = 1100;
-  let id = 10000;
-  for(let back=SPAN; back>=0; back--){
-    const d = new Date(TODAY.getTime()-back*DAY);
-    const growth = 0.55 + 0.45*(1-back/SPAN);
-    const season = 1 + 0.25*Math.sin((d.getMonth()/12)*Math.PI*2 - 1);
-    const weekend = [4,5].includes(d.getDay()) ? 1.25 : 1;      // الخميس والجمعة
-    const count = Math.max(1, Math.round((9 + r()*7) * growth * season * weekend));
-    for(let k=0;k<count;k++){
-      const lines = [], nl = 1 + (r()<.35) + (r()<.12);
-      let sum = 0, qty = 0;
-      for(let l=0;l<nl;l++){const pi = pick(), q = 1 + (r()<.25); lines.push([pi,q]); sum += PRODUCTS[pi].p*q; qty += q}
-      const ts = d.getTime() + Math.floor((8 + r()*15)*36e5);
-      const s = r();
-      let status;
-      if(back<=6) status = s<.38 ? 'shipping' : s<.92 ? 'completed' : s<.96 ? 'canceled' : 'refunded';
-      else status = s<.85 ? 'completed' : s<.93 ? 'canceled' : 'refunded';
-      out.push({id:++id, customer:NAMES[Math.floor(r()*NAMES.length)], ts, status, total:sum, qty, lines});
-    }
-  }
-  return out;
-})();
-const VALID = o => o.status==='completed' || o.status==='shipping';
-const STATUS_AR = {completed:'مكتمل', shipping:'جاري الشحن', canceled:'ملغي', refunded:'مسترجع'};
+let DATA = null, TODAY = null, DAILY = [];
 
 /* ============ Helpers ============ */
 const $ = s => document.querySelector(s);
@@ -310,15 +277,16 @@ const MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','
 const pad = n => String(n).padStart(2,'0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseYmd = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
-const fmtDate = ts => { const d = new Date(ts); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+const fmtDate = d => `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x}
 
 const ICONS = {
   revenue:'<path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.8 7 7c0 4.5 10 2.5 10 7 0 2.2-2.2 3.5-5 3.5s-5-1.1-5-3"/>',
   orders:'<path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/>',
   aov:'<path d="M3 3v18h18M7 14l4-4 3 3 5-6"/>',
   cancel:'<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>',
-  products:'<path d="M21 8l-9-5-9 5v8l9 5 9-5V8zM3.3 7.5L12 12.5l8.7-5M12 22V12.5"/>'
+  customers:'<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>'
 };
 const icon = k => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -330,47 +298,39 @@ function rangeFor(preset){
   if(preset==='today') return [t, t];
   if(preset==='week'){ const back = (t.getDay()+1)%7; return [new Date(t.getTime()-back*DAY), t]; } // الأسبوع يبدأ السبت
   if(preset==='month') return [new Date(t.getFullYear(), t.getMonth(), 1), t];
+  if(preset==='d30') return [new Date(t.getTime()-29*DAY), t];
   if(preset==='year')  return [new Date(t.getFullYear(), 0, 1), t];
   return [state.from, state.to];
 }
 
-/* ============ Aggregation ============ */
+/* ============ Aggregation (من التقرير اليومي) ============ */
 function aggregate(from, to){
-  const a = from.getTime(), b = endOfDay(to).getTime();
-  const list = ORDERS.filter(o => o.ts>=a && o.ts<=b);
-  const valid = list.filter(VALID);
-  const revenue = valid.reduce((s,o)=>s+o.total,0);
-  const lost = list.filter(o=>!VALID(o));
-  const prodMap = {};
-  valid.forEach(o => o.lines.forEach(([pi,q]) => {
-    const m = prodMap[pi] || (prodMap[pi] = {pi, qty:0, total:0});
-    m.qty += q; m.total += q*PRODUCTS[pi].p;
-  }));
-  return {
-    list, revenue,
-    orders: list.length,
-    aov: valid.length ? revenue/valid.length : 0,
-    lost: lost.length,
-    lostValue: lost.reduce((s,o)=>s+o.total,0),
-    sold: valid.reduce((s,o)=>s+o.qty,0),
-    counts: {
-      completed: list.filter(o=>o.status==='completed').length,
-      shipping: list.filter(o=>o.status==='shipping').length,
-      canceled: list.filter(o=>o.status==='canceled').length,
-      refunded: list.filter(o=>o.status==='refunded').length
-    },
-    top: Object.values(prodMap).sort((x,y)=>y.qty-x.qty).slice(0,5)
-  };
+  const a = ymd(from), b = ymd(to);
+  const rows = DAILY.filter(r => r.d>=a && r.d<=b);
+  const revenue = rows.reduce((s,r)=>s+r.s,0);
+  const orders = rows.reduce((s,r)=>s+r.o,0);
+  const customers = rows.reduce((s,r)=>s+r.c,0);
+  return { rows, revenue, orders, customers, aov: orders ? revenue/orders : 0 };
 }
 function previousRange(from, to){
   const days = Math.round((startOfDay(to)-startOfDay(from))/DAY)+1;
+  // الشهر والسنة يُقارنان بنفس الأيام من الشهر/السنة السابقة (عشان أيام الرواتب ما تشوّه المقارنة)
+  if(state.preset==='month'){
+    const pf = new Date(from.getFullYear(), from.getMonth()-1, 1);
+    const last = new Date(from.getFullYear(), from.getMonth(), 0).getDate();
+    return [pf, new Date(pf.getFullYear(), pf.getMonth(), Math.min(to.getDate(), last)), days];
+  }
+  if(state.preset==='year'){
+    return [new Date(from.getFullYear()-1, 0, 1), new Date(to.getFullYear()-1, to.getMonth(), to.getDate()), days];
+  }
   const pTo = new Date(from.getTime()-DAY);
   const pFrom = new Date(pTo.getTime()-(days-1)*DAY);
   return [pFrom, pTo, days];
 }
 
 /* ============ Render: KPIs ============ */
-function deltaHTML(cur, prev, invert){
+let deltaHTML;
+function realDelta(cur, prev, invert){
   if(!prev && !cur) return '<span class="delta flat">— 0%</span>';
   if(!prev) return '<span class="delta flat">جديد</span>';
   const pct = (cur-prev)/prev*100;
@@ -379,22 +339,27 @@ function deltaHTML(cur, prev, invert){
   const arrow = up ? '<path d="M12 19V5M5 12l7-7 7 7"/>' : '<path d="M12 5v14M19 12l-7 7-7-7"/>';
   return `<span class="delta ${good?'up':'down'}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${arrow}</svg>${Math.abs(pct).toFixed(1)}%</span>`;
 }
-function renderKpis(cur, prev){
+function renderKpis(cur, prev, hasPrev){
+  const st = DATA.status_30d || {};
+  const lost = (st.canceled||0) + (st.returned||0);
+  const all = (st.completed||0) + (st.processing||0) + lost;
+  const cmpTxt = state.preset==='month' ? 'عن نفس الأيام الشهر الماضي' : state.preset==='year' ? 'عن نفس الفترة العام الماضي' : state.preset==='today' ? 'عن أمس' : 'عن الفترة السابقة';
+  const cmp = `<span class="sub" style="margin-inline-start:4px">${cmpTxt}</span>`;
+  if(!hasPrev) deltaHTML = () => '<span class="delta flat">لا توجد بيانات للمقارنة</span>';
   const items = [
-    {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)},
-    {k:'orders', lbl:'عدد الطلبات', val:fmt(cur.orders), d:deltaHTML(cur.orders, prev.orders)},
-    {k:'aov', lbl:'متوسط قيمة الطلب', val:money(cur.aov), unit:CURRENCY, d:deltaHTML(cur.aov, prev.aov)},
-    {k:'cancel', cls:'alert', lbl:'الملغية / المسترجعة', val:fmt(cur.lost), d:deltaHTML(cur.lost, prev.lost, true),
-      sub:`قيمة مفقودة: ${money(cur.lostValue)} ${CURRENCY}`},
-    {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)}
+    {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)+cmp},
+    {k:'orders', lbl:'عدد الطلبات', val:fmt(cur.orders), d:deltaHTML(cur.orders, prev.orders)+cmp},
+    {k:'aov', lbl:'متوسط قيمة الطلب', val:money(cur.aov), unit:CURRENCY, d:deltaHTML(cur.aov, prev.aov)+cmp},
+    {k:'customers', lbl:'العملاء', val:fmt(cur.customers), d:deltaHTML(cur.customers, prev.customers)+cmp},
+    {k:'cancel', cls:'alert', lbl:'الملغية / المسترجعة', val:fmt(lost),
+      d:`<span class="sub">آخر 30 يوم · ${all?(lost/all*100).toFixed(1):'0.0'}% من الطلبات</span>`}
   ];
   $('#kpis').innerHTML = items.map(i => `
     <article class="card kpi ${i.cls||''}">
       <div class="ico">${icon(i.k)}</div>
       <div class="lbl">${i.lbl}</div>
       <div class="val">${i.val}${i.unit?`<small>${i.unit}</small>`:''}</div>
-      <div>${i.d} <span class="sub" style="margin-inline-start:4px">عن الفترة السابقة</span></div>
-      ${i.sub?`<div class="sub">${i.sub}</div>`:''}
+      <div>${i.d}</div>
     </article>`).join('');
 }
 
@@ -402,34 +367,22 @@ function renderKpis(cur, prev){
 let trendChart, statusChart;
 function autoGran(days){ return days<=62 ? 'day' : days<=800 ? 'month' : 'year'; }
 
-function buildSeries(from, to, gran){
-  const keys = [], labels = [], idx = {};
-  const add = (key,label) => { idx[key] = keys.length; keys.push(key); labels.push(label); };
-  const cur = new Date(from);
-  if(gran==='day'){
-    for(let d=startOfDay(from); d<=to; d=new Date(d.getFullYear(), d.getMonth(), d.getDate()+1)) add(ymd(d), `${d.getDate()} ${MONTHS[d.getMonth()]}`);
-  } else if(gran==='month'){
-    for(let d=new Date(from.getFullYear(), from.getMonth(), 1); d<=to; d=new Date(d.getFullYear(), d.getMonth()+1, 1)) add(`${d.getFullYear()}-${d.getMonth()}`, `${MONTHS[d.getMonth()]} ${d.getFullYear()}`);
-  } else {
-    for(let y=from.getFullYear(); y<=to.getFullYear(); y++) add(String(y), String(y));
-  }
-  const keyOf = ts => { const d = new Date(ts); return gran==='day' ? ymd(d) : gran==='month' ? `${d.getFullYear()}-${d.getMonth()}` : String(d.getFullYear()); };
-  return {labels, idx, keyOf, rev:new Array(keys.length).fill(0), cnt:new Array(keys.length).fill(0)};
-}
-
 function renderTrend(cur, from, to){
-  const s = buildSeries(from, to, state.gran);
-  cur.list.forEach(o => {
-    const i = s.idx[s.keyOf(o.ts)];
-    if(i===undefined) return;
-    s.cnt[i]++; if(VALID(o)) s.rev[i] += o.total;
-  });
+  const g = state.gran, keys = [], labels = [], idx = {};
+  const add = (k,l) => { idx[k] = keys.length; keys.push(k); labels.push(l); };
+  if(g==='day') for(let d=startOfDay(from); d<=to; d=new Date(d.getFullYear(), d.getMonth(), d.getDate()+1)) add(ymd(d), `${d.getDate()} ${MONTHS[d.getMonth()]}`);
+  else if(g==='month') for(let d=new Date(from.getFullYear(), from.getMonth(), 1); d<=to; d=new Date(d.getFullYear(), d.getMonth()+1, 1)) add(`${d.getFullYear()}-${pad(d.getMonth()+1)}`, `${MONTHS[d.getMonth()]} ${d.getFullYear()}`);
+  else for(let y=from.getFullYear(); y<=to.getFullYear(); y++) add(String(y), String(y));
+  const keyOf = d => g==='day' ? d : g==='month' ? d.slice(0,7) : d.slice(0,4);
+  const rev = new Array(keys.length).fill(0), cnt = new Array(keys.length).fill(0);
+  cur.rows.forEach(r => { const i = idx[keyOf(r.d)]; if(i!==undefined){ rev[i]+=r.s; cnt[i]+=r.o; } });
+
   const ctx = $('#trend').getContext('2d');
-  const g = ctx.createLinearGradient(0,0,0,300);
-  g.addColorStop(0,'rgba(236,72,153,.32)'); g.addColorStop(1,'rgba(236,72,153,0)');
-  const few = s.labels.length<=40;
-  const data = {labels:s.labels, datasets:[{
-    label:'المبيعات', data:s.rev, borderColor:'#ec4899', backgroundColor:g, fill:true, tension:.38, borderWidth:2.5,
+  const grad = ctx.createLinearGradient(0,0,0,300);
+  grad.addColorStop(0,'rgba(236,72,153,.32)'); grad.addColorStop(1,'rgba(236,72,153,0)');
+  const few = labels.length<=40;
+  const data = {labels, datasets:[{
+    label:'المبيعات', data:rev, borderColor:'#ec4899', backgroundColor:grad, fill:true, tension:.38, borderWidth:2.5,
     pointRadius:few?3.5:0, pointHoverRadius:6, pointBackgroundColor:'#fff', pointBorderColor:'#ec4899', pointBorderWidth:2
   }]};
   const opts = {
@@ -438,7 +391,7 @@ function renderTrend(cur, from, to){
       legend:{display:false},
       tooltip:{rtl:true, textDirection:'rtl', backgroundColor:'#2a1a24', padding:12, cornerRadius:12, displayColors:false,
         titleFont:{family:'IBM Plex Sans Arabic'}, bodyFont:{family:'IBM Plex Sans Arabic'},
-        callbacks:{label:c=>`المبيعات: ${money(c.parsed.y)} ${CURRENCY}`, afterLabel:c=>`الطلبات: ${fmt(s.cnt[c.dataIndex])}`}}
+        callbacks:{label:c=>`المبيعات: ${money(c.parsed.y)} ${CURRENCY}`, afterLabel:c=>`الطلبات: ${fmt(cnt[c.dataIndex])}`}}
     },
     scales:{
       x:{grid:{display:false}, border:{display:false}, ticks:{maxTicksLimit:8, maxRotation:0, color:'#8b7480', font:{family:'IBM Plex Sans Arabic', size:11}}},
@@ -450,13 +403,14 @@ function renderTrend(cur, from, to){
   document.querySelectorAll('#gran button').forEach(b => b.classList.toggle('on', b.dataset.g===state.gran));
 }
 
-function renderStatus(cur){
-  const c = cur.counts, total = cur.orders;
+function renderStatus(){
+  const c = DATA.status_30d || {};
   const rows = [
-    {l:'مكتمل', v:c.completed, c:'#ec4899'},
-    {l:'قيد التنفيذ', v:c.shipping, c:'#f9a8d4'},
-    {l:'ملغي / مسترجع', v:c.canceled+c.refunded, c:'#9f1239'}
+    {l:'مكتمل / تم التوصيل', v:c.completed||0, c:'#ec4899'},
+    {l:'قيد المراجعة / التنفيذ', v:c.processing||0, c:'#f9a8d4'},
+    {l:'ملغي / مسترجع', v:(c.canceled||0)+(c.returned||0), c:'#9f1239'}
   ];
+  const total = rows.reduce((s,r)=>s+r.v,0);
   const data = {labels:rows.map(r=>r.l), datasets:[{data:rows.map(r=>r.v), backgroundColor:rows.map(r=>r.c), borderWidth:3, borderColor:'#fff', hoverOffset:6}]};
   const opts = {responsive:true, maintainAspectRatio:false, cutout:'72%',
     plugins:{legend:{display:false}, tooltip:{rtl:true, textDirection:'rtl', backgroundColor:'#2a1a24', cornerRadius:12, padding:10,
@@ -470,35 +424,35 @@ function renderStatus(cur){
 }
 
 /* ============ Render: tables ============ */
-let currentList = [];
 function renderOrders(){
   const q = $('#search').value.trim().toLowerCase();
-  let rows = currentList.slice().sort((a,b)=>b.ts-a.ts);
-  if(q) rows = rows.filter(o => String(o.id).includes(q) || o.customer.toLowerCase().includes(q));
-  const shown = rows.slice(0,8);
-  $('#ordersCount').textContent = `عرض ${fmt(shown.length)} من ${fmt(rows.length)} طلب`;
-  $('#orders').innerHTML = shown.length ? shown.map(o => `
-    <tr>
-      <td class="oid">#${o.id}</td><td>${esc(o.customer)}</td><td>${fmtDate(o.ts)}</td>
-      <td><span class="badge b-${o.status}">${STATUS_AR[o.status]}</span></td>
+  let rows = DATA.recent || [];
+  if(q) rows = rows.filter(o => String(o.ref).includes(q) || o.customer.toLowerCase().includes(q) || (o.city||'').includes(q));
+  $('#orders').innerHTML = rows.length ? rows.map(o => {
+    const d = new Date(o.date.replace(' ','T'));
+    return `<tr>
+      <td class="oid">#${o.ref}</td><td>${esc(o.customer)}</td><td>${esc(o.city||'—')}</td>
+      <td>${d.getDate()} ${MONTHS[d.getMonth()]} · ${pad(d.getHours())}:${pad(d.getMinutes())}</td>
+      <td><span class="badge b-${o.group}">${esc(o.status)}</span></td>
       <td><b>${money(o.total)}</b> ${CURRENCY}</td>
-    </tr>`).join('') : `<tr><td colspan="5" class="empty">لا توجد طلبات مطابقة في هذه الفترة</td></tr>`;
+    </tr>`;}).join('') : `<tr><td colspan="6" class="empty">لا توجد طلبات مطابقة</td></tr>`;
 }
-function renderTop(cur){
-  const max = cur.top.length ? cur.top[0].qty : 1;
-  $('#top').innerHTML = cur.top.length ? cur.top.map((t,i) => {
-    const p = PRODUCTS[t.pi];
-    return `<li>
+const TOP_FOR = {today:['week','هذا الأسبوع'], week:['week','هذا الأسبوع'], month:['month','هذا الشهر'], d30:['d30','آخر 30 يوم'], year:['year','هذه السنة'], custom:['d30','آخر 30 يوم']};
+function renderTop(){
+  const [key, label] = TOP_FOR[state.preset] || TOP_FOR.d30;
+  const list = (DATA.top && DATA.top[key]) || [];
+  $('#topNote').textContent = `حسب القطع المباعة · ${label}`;
+  const max = list.length ? list[0].qty : 1;
+  $('#top').innerHTML = list.length ? list.map((t,i) => `<li>
       <span class="rank">${i+1}</span>
-      <div class="pimg" aria-hidden="true">${p.i}</div>
-      <div class="pinfo"><b>${p.n}</b><span>${fmt(t.qty)} مبيعة</span><div class="bar"><i style="width:${t.qty/max*100}%"></i></div></div>
-      <div class="ptot">${money(t.total)}<small>${CURRENCY}</small></div>
-    </li>`;
-  }).join('') : '<li class="empty" style="display:block;border:0">لا توجد مبيعات في هذه الفترة</li>';
+      <div class="pimg"><img src="${esc(t.img)}" alt="" loading="lazy"></div>
+      <div class="pinfo"><b title="${esc(t.name)}">${esc(t.name)}</b><span>${fmt(t.qty)} قطعة مباعة</span><div class="bar"><i style="width:${t.qty/max*100}%"></i></div></div>
+    </li>`).join('') : '<li class="empty" style="display:block;border:0">لا توجد مبيعات في هذه الفترة</li>';
 }
 
 /* ============ Main update ============ */
 function update(){
+  if(!DATA) return;
   let [from, to] = rangeFor(state.preset);
   if(!from || !to || isNaN(from) || isNaN(to)) return;
   if(from>to) [from,to] = [to,from];
@@ -507,12 +461,12 @@ function update(){
   if(!state.granManual) state.gran = autoGran(days);
 
   $('#periodNote').innerHTML = `الفترة الحالية: <b>${fmtDate(from)}${days>1?' – '+fmtDate(to):''}</b> · مقارنةً بـ ${fmtDate(pFrom)}${days>1?' – '+fmtDate(pTo):''}`;
-  renderKpis(cur, prev);
+  deltaHTML = realDelta;
+  const hasPrev = ymd(pFrom) >= DAILY[0].d;
+  renderKpis(cur, prev, hasPrev);
+  $('#periodNote').innerHTML += hasPrev ? '' : ' · <b>لا تتوفر بيانات كافية للفترة السابقة</b>';
   renderTrend(cur, from, to);
-  renderStatus(cur);
-  currentList = cur.list;
-  renderOrders();
-  renderTop(cur);
+  renderTop();
   state.view = {from, to, cur};
 }
 
@@ -522,11 +476,11 @@ function setPreset(p){
   $('#preset').value = p;
   document.querySelectorAll('#quick button').forEach(b => b.classList.toggle('on', b.dataset.p===p));
   $('#range').hidden = p!=='custom';
-  if(p!=='custom'){ const [f,t] = rangeFor(p); $('#from').value = ymd(f); $('#to').value = ymd(t); }
+  if(p!=='custom' && TODAY){ const [f,t] = rangeFor(p); $('#from').value = ymd(f); $('#to').value = ymd(t); }
   update();
 }
 $('#preset').addEventListener('change', e => {
-  if(e.target.value==='custom'){
+  if(e.target.value==='custom' && $('#from').value && $('#to').value){
     state.from = parseYmd($('#from').value); state.to = parseYmd($('#to').value);
   }
   setPreset(e.target.value);
@@ -543,7 +497,6 @@ function onCustom(){
 }
 $('#from').addEventListener('change', onCustom);
 $('#to').addEventListener('change', onCustom);
-$('#from').max = $('#to').max = ymd(TODAY);
 document.querySelectorAll('#gran button').forEach(b => b.addEventListener('click', () => {
   state.gran = b.dataset.g; state.granManual = true; update();
 }));
@@ -557,27 +510,58 @@ $('#export').addEventListener('click', () => {
   const v = state.view; if(!v) return;
   const q = s => `"${String(s).replace(/"/g,'""')}"`;
   const lines = [
-    ['تقرير المبيعات'], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)}`], [],
-    ['إجمالي المبيعات', v.cur.revenue], ['عدد الطلبات', v.cur.orders], ['متوسط قيمة الطلب', Math.round(v.cur.aov)],
-    ['الطلبات الملغية/المسترجعة', v.cur.lost], ['المنتجات المباعة', v.cur.sold], [],
-    ['رقم الطلب','العميل','التاريخ','الحالة','الإجمالي']
+    ['تقرير مبيعات اي براند'], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)}`], [],
+    ['إجمالي المبيعات', Math.round(v.cur.revenue)], ['عدد الطلبات', v.cur.orders], ['متوسط قيمة الطلب', Math.round(v.cur.aov)], ['العملاء', v.cur.customers], [],
+    ['التاريخ','الطلبات','المبيعات','العملاء']
   ].map(r => r.map(q).join(','));
-  v.cur.list.slice().sort((a,b)=>b.ts-a.ts).forEach(o =>
-    lines.push([o.id, o.customer, ymd(new Date(o.ts)), STATUS_AR[o.status], o.total].map(q).join(',')));
+  v.cur.rows.forEach(r => lines.push([r.d, r.o, r.s, r.c].map(q).join(',')));
   const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `sales-report_${ymd(v.from)}_${ymd(v.to)}.csv`;
+  a.href = URL.createObjectURL(blob); a.download = `ibrand-sales_${ymd(v.from)}_${ymd(v.to)}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 500);
   toast('تم تصدير التقرير بنجاح ✓');
 });
 
+/* ============ Load data.json ============ */
+function renderUpdated(){
+  if(!DATA) return;
+  const u = new Date(DATA.updated_at);
+  const mins = Math.round((Date.now()-u)/6e4);
+  const ago = mins<1 ? 'الآن' : mins<60 ? `قبل ${mins} دقيقة` : mins<1440 ? `قبل ${Math.round(mins/60)} ساعة` : `قبل ${Math.round(mins/1440)} يوم`;
+  $('#updated').textContent = `آخر تحديث ${ago}`;
+  $('#live').title = u.toLocaleString('ar-SA');
+  $('#live').classList.toggle('stale', mins>360);
+}
+async function load(first){
+  try{
+    const res = await fetch('data.json?t='+Date.now(), {cache:'no-store'});
+    if(!res.ok) throw new Error(res.status);
+    const d = await res.json();
+    if(!first && DATA && d.updated_at===DATA.updated_at){ renderUpdated(); return; }
+    DATA = d;
+    DAILY = d.daily.map(([d,o,s,c]) => ({d,o,s,c}));
+    TODAY = parseYmd(DAILY[DAILY.length-1].d);
+    $('#from').max = $('#to').max = ymd(TODAY);
+    $('#from').min = $('#to').min = DAILY[0].d;
+    renderUpdated(); renderStatus(); renderOrders();
+    if(first) setPreset('month'); else update();
+  }catch(e){
+    $('#updated').textContent = 'تعذّر تحميل البيانات';
+    $('#live').classList.add('stale');
+    if(first) $('#kpis').innerHTML = '<div class="card loading" style="grid-column:1/-1">تعذّر تحميل البيانات، حدّث الصفحة بعد قليل</div>';
+  }
+}
+
 /* ============ Init ============ */
 (function(){
   const h = new Date().getHours();
-  $('#greet').textContent = (h<12 ? 'صباح الخير' : h<18 ? 'مساء الخير' : 'مساء النور') + ' — نظرة شاملة على أداء متجرك';
+  $('#greet').textContent = (h<12 ? 'صباح الخير' : h<18 ? 'مساء الخير' : 'مساء النور') + ' — أداء متجر اي براند على سلة';
+  $('#kpis').innerHTML = '<div class="card loading" style="grid-column:1/-1">جارٍ تحميل البيانات…</div>';
   if(typeof Chart==='undefined'){ toast('تعذّر تحميل مكتبة الرسوم البيانية'); return; }
   Chart.defaults.font.family = "'IBM Plex Sans Arabic', sans-serif";
-  setPreset('month');
+  load(true);
+  setInterval(() => load(false), 5*60*1000);   // يتحقق من وجود تحديث كل 5 دقائق
+  setInterval(renderUpdated, 60*1000);
 })();
 </script>
 </body>
