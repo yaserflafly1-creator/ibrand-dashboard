@@ -510,7 +510,7 @@ async function ensureLive(from, to){
   const a = ymd(from), b = ymd(to);
   if(liveRange && liveRange[0]<=a && liveRange[1]>=b) return true;
   const res = await fetch(`/api/orders?from=${a}&to=${b}&token=${encodeURIComponent(QS.get('token'))}`);
-  if(!res.ok) throw new Error('HTTP '+res.status);
+  if(!res.ok){ const err = new Error('HTTP '+res.status); err.status = res.status; throw err; }
   const j = await res.json();
   PRODUCTS.length = 0;
   const idx = {};
@@ -526,6 +526,18 @@ async function ensureLive(from, to){
   return true;
 }
 
+// انتهاء جلسة التطبيق المضمَّن: نطلب من سلة إعادة تحميل الإطار بتوكن جديد (embedded.auth.refresh)
+// مع حارس يمنع الحلقة إن بقي التوكن غير صالح لسبب آخر.
+function sessionExpired(){
+  let last = 0;
+  try{ last = Number(sessionStorage.getItem('sallaRefreshAt')) || 0; }catch(e){}
+  if(Date.now()-last < 30000){ toast('تعذّر تجديد الجلسة، أعد فتح التطبيق من لوحة سلة'); return; }
+  try{ sessionStorage.setItem('sallaRefreshAt', String(Date.now())); }catch(e){}
+  toast('انتهت الجلسة، جارٍ التحديث…');
+  const sdk = window.sallaEmbedded; // يُحدَّد عند ربط الـ SDK (انظر README)
+  if(sdk && sdk.auth && typeof sdk.auth.refresh==='function') setTimeout(() => sdk.auth.refresh(), 600);
+}
+
 async function update(){
   let [from, to] = rangeFor(state.preset);
   if(!from || !to || isNaN(from) || isNaN(to)) return;
@@ -533,7 +545,7 @@ async function update(){
   const [pFrom, pTo, days] = previousRange(from, to);
   const seq = ++liveSeq;
   try{ await ensureLive(pFrom, to); }
-  catch(e){ if(seq===liveSeq) toast('تعذّر جلب بيانات المتجر من سلة'); return; }
+  catch(e){ if(seq!==liveSeq) return; if(e.status===401) return sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); return; }
   if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
   const cur = aggregate(from, to), prev = aggregate(pFrom, pTo);
   if(!state.granManual) state.gran = autoGran(days);

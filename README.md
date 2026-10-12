@@ -28,6 +28,10 @@
 - نقطة التحقق من توكن التطبيق المضمَّن (introspect) وشكل استجابتها، وطريقة تمرير التوكن للصفحة.
 - ترويسات السماح بعرض الصفحة داخل iframe سلة (frame-ancestors) إن لزم.
 
+## جلسة التطبيق المضمَّن
+- عند ردّ `401` من `/api/orders` تستدعي الصفحة `embedded.auth.refresh()` (من `@salla.sa/embedded-sdk`) لإعادة تحميل الإطار بتوكن جديد، مع حارس 30 ثانية ضد الحلقات.
+- ⚠️ تحميل الـ SDK نفسه (`window.sallaEmbedded`) وطريقة وصول التوكن للصفحة (نفترض `?token=`) ينتظران صفحات Embedded SDK: Installation / Initialization / Auth.
+
 ## تصنيف حالات الطلب (من List Order Statuses)
 - **مكتمل:** `completed`, `delivered` · **ملغي:** `canceled`, `payment_failed` · **مسترجع:** `restored`, `restoring`
 - **قيد التنفيذ:** `in_progress`, `under_review`, `shipped`, `delivering`, `waiting_for_payment_confirmation`
