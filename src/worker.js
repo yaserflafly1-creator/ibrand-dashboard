@@ -18,17 +18,21 @@ function safeEqual(a, b) {
 
 async function handleWebhook(req, env) {
   const raw = await req.text();
-  // [VERIFY] اسم ترويسة التوقيع وطريقته (Signature strategy) في وثائق Webhooks
-  const sig = req.headers.get('x-salla-signature') || '';
-  if (!env.SALLA_WEBHOOK_SECRET || !safeEqual(sig, await hmacHex(env.SALLA_WEBHOOK_SECRET, raw))) {
-    return json({ error: 'bad signature' }, 401);
-  }
+  // وثيقة Webhooks: الترويسة X-Salla-Security-Strategy تحدد الاستراتيجية.
+  //  - signature: X-Salla-Signature = HMAC-SHA256(hex) لنص الطلب الخام بالسر
+  //  - token: السر نفسه يصل في ترويسة Authorization
+  if (!env.SALLA_WEBHOOK_SECRET) return json({ error: 'webhook secret not configured' }, 500);
+  const strategy = (req.headers.get('x-salla-security-strategy') || 'signature').toLowerCase();
+  const ok = strategy === 'token'
+    ? safeEqual((req.headers.get('authorization') || '').replace(/^Bearer\s+/i, ''), env.SALLA_WEBHOOK_SECRET)
+    : safeEqual((req.headers.get('x-salla-signature') || '').toLowerCase(), await hmacHex(env.SALLA_WEBHOOK_SECRET, raw));
+  if (!ok) return json({ error: 'bad signature' }, 401);
   const evt = JSON.parse(raw);
   const merchant = String(evt.merchant ?? evt.data?.merchant ?? '');
   if (!merchant) return json({ ok: true });
 
   if (evt.event === 'app.store.authorize') {
-    // [VERIFY] data.access_token / refresh_token / expires (Easy Mode)
+    // [VERIFY] (صفحة App Events) data.access_token / refresh_token / expires (Easy Mode)
     const d = evt.data || {};
     await saveTokens(env, merchant, { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Number(d.expires) * 1000 || 0 });
   } else if (evt.event === 'app.uninstalled') {
