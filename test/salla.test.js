@@ -23,9 +23,10 @@ test('normalizeOrder follows List Orders shape', () => {
     date: { date: '2026-08-02 18:08:47.000000', timezone: 'Asia/Riyadh' },
     status: { slug: 'in_progress' },
     items: [{ name: 'Perfumes Package', quantity: 1, thumbnail: 'x.png' }, { name: 'Dress', quantity: 1, thumbnail: null }],
-    customer: { full_name: 'Mohammed Ahmed' }
+    customer: { id: 77, full_name: 'Mohammed Ahmed', city: 'جدة' }, payment_method: 'mada', source: 'store'
   });
   assert.deepEqual([o.id, o.customer, o.status, o.total, o.qty], [275839672, 'Mohammed Ahmed', 'shipping', 16.39, 2]);
+  assert.deepEqual([o.customerId, o.city, o.paymentMethod, o.source], [77, 'جدة', 'mada', 'store']);
   assert.equal(o.lines.length, 2);
   assert.equal(o.lines[0].price, 16.39 / 2);
   assert.equal(o.lines[1].img, '');

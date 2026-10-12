@@ -33,6 +33,10 @@ export function normalizeOrder(o) {
   const total = Number(o.total?.amount) || 0;
   return {
     id: o.reference_id ?? o.id,
+    customerId: o.customer?.id ?? null,
+    city: o.customer?.city || '',
+    paymentMethod: o.payment_method || '',
+    source: o.source || '',
     customer: o.customer?.full_name || [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || 'عميل',
     ts: parseSallaDate(o.date),
     status: mapStatus(o.status?.slug),

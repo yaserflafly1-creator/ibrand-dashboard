@@ -101,8 +101,10 @@ function makeClient(env, merchant, tokens) {
 /* ---------- /api/orders ---------- */
 const PER_PAGE = 30;      // الحد الأقصى المسموح (وثيقة List Orders)
 const MAX_PAGES = 300;    // سقف أمان لعدد النداءات
-const CACHE_TTL = 300;    // ثوانٍ
+const CACHE_TTL_LIVE = 60;    // ثوانٍ، للفترات التي تشمل اليوم
+const CACHE_TTL_PAST = 600;   // للفترات المنتهية
 const CATALOG_TTL = 3600;
+const todayRiyadh = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
 
 // كتالوج المنتجات (format=light) لأسعار «الأكثر مبيعاً». يحتاج صلاحية products.read
 async function loadCatalog(env, merchant, get) {
@@ -151,7 +153,7 @@ async function handleOrders(req, env) {
   } catch { /* بدون products.read نبقى على تقدير السعر */ }
 
   const body = JSON.stringify({ orders, currency: orders[0]?.currency || 'SAR', truncated, pricesEstimated });
-  if (!truncated) await env.TOKENS.put(cacheKey, body, { expirationTtl: CACHE_TTL });
+  if (!truncated) await env.TOKENS.put(cacheKey, body, { expirationTtl: to >= todayRiyadh() ? CACHE_TTL_LIVE : CACHE_TTL_PAST });
   return new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
