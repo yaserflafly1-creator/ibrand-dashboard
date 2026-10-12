@@ -1,0 +1,16 @@
+{
+  "name": "salla-smart-tags",
+  "version": "1.0.0",
+  "description": "تطبيق سلة يضيف 12 وسم ذكي لكل منتج (مرادفات + أخطاء إملائية) لتسهيل البحث",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "express": "^4.19.2"
+  }
+}
