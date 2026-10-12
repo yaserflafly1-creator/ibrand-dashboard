@@ -239,7 +239,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
   </section>
   <p class="period-note" id="periodNote"></p>
   <div class="live-row">
-    <span class="pulse" id="pulse"></span><span id="lastUpdated">جارٍ التحميل…</span>
+    <span class="pulse" id="pulse"></span><span id="lastUpdated">جارٍ التحميل…</span><span id="syncInfo" style="color:var(--pink-700)"></span>
     <label><input type="checkbox" id="auto" checked> تحديث تلقائي كل دقيقة</label>
     <button class="linkbtn" id="refreshNow" type="button">تحديث الآن</button>
   </div>
@@ -310,13 +310,11 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
       <div class="chart-box" style="height:260px"><canvas id="timeChart" dir="ltr"></canvas></div>
     </div>
     <div class="card panel">
-      <div class="panel-h"><div><h2>العملاء</h2><p>جدد وعائدون وأفضل المشترين</p></div></div>
-      <p class="period-note" id="custTotals" style="margin:0 0 12px"></p>
+      <div class="panel-h"><div><h2>العملاء</h2><p>من سجلات العملاء في المتجر</p></div></div>
       <div class="mini-kpis">
-        <div class="mini"><b id="custNew">0</b><span>عميل جديد</span></div>
-        <div class="mini"><b id="custRet">0</b><span>عميل عائد</span></div>
+        <div class="mini"><b id="custTotal">—</b><span>إجمالي العملاء المسجلين</span></div>
+        <div class="mini"><b id="custInRange">—</b><span>سجّلوا في هذه الفترة</span></div>
       </div>
-      <ul class="bars" id="topCust"></ul>
     </div>
   </section>
 
@@ -397,7 +395,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 
   <dialog id="orderDlg"><div class="dlg" id="orderDlgBody"></div></dialog>
 
-  <footer>بيانات تجريبية لأغراض العرض · يتم تحديث كل المؤشرات تلقائياً عند تغيير الفترة</footer>
+  <footer>داخل سلة تُعرض بيانات متجرك الحقيقية وتُحدَّث تلقائياً؛ وخارجها (أو بـ ?demo) تُعرض بيانات تجريبية</footer>
 </div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -495,14 +493,7 @@ function rangeFor(preset){
 }
 
 /* ============ Aggregation ============ */
-// أول ظهور لكل عميل ضمن الطلبات المحمَّلة (الفترتان الحالية والسابقة) لتمييز الجديد من العائد
-let _first = null, _firstFor = null;
-function firstSeenMap(){
-  if(_firstFor === ORDERS) return _first;
-  _first = new Map();
-  ORDERS.forEach(o => { if(VALID(o) && o.cid!=null){ const t = _first.get(o.cid); if(t===undefined || o.ts<t) _first.set(o.cid, o.ts); } });
-  _firstFor = ORDERS; return _first;
-}
+// يحاكي ما يعيده الخادم (/api/summary) من بيانات الوضع التجريبي، فتشترك الواجهة في مسار عرض واحد
 function aggregate(from, to){
   const a = from.getTime(), b = endOfDay(to).getTime();
   const list = ORDERS.filter(o => o.ts>=a && o.ts<=b);
@@ -511,23 +502,20 @@ function aggregate(from, to){
   const lost = list.filter(o=>!VALID(o));
   const prodMap = {};
   valid.forEach(o => o.lines.forEach(([pi,q]) => {
-    const m = prodMap[pi] || (prodMap[pi] = {pi, qty:0, total:0});
-    m.qty += q; m.total += q*PRODUCTS[pi].p;
+    const p = PRODUCTS[pi], m = prodMap[p.n] || (prodMap[p.n] = {name:p.n, qty:0, total:0, img:p.img||'', icon:p.i});
+    m.qty += q; m.total += q*p.p;
   }));
-  const bucket = keyFn => { const m = {}; valid.forEach(o => { const k = keyFn(o) || 'غير محدد'; const x = m[k] || (m[k] = {k, orders:0, total:0}); x.orders++; x.total += o.total; }); return Object.values(m).sort((x,y)=>y.total-x.total); };
-  const hours = new Array(24).fill(0), dow = new Array(7).fill(0), custs = {};
-  valid.forEach(o => { const d = new Date(o.ts); hours[d.getHours()]++; dow[d.getDay()]++;
-    const c = custs[o.cid] || (custs[o.cid] = {cid:o.cid, name:o.customer, orders:0, total:0}); c.orders++; c.total += o.total; });
-  const first = firstSeenMap();
-  const custList = Object.values(custs);
-  const returning = custList.filter(c => (first.get(c.cid) ?? a) < a).length;
+  const bucket = keyFn => { const m = {}; valid.forEach(o => { const k = keyFn(o) || 'unknown'; const x = m[k] || (m[k] = {k, orders:0, total:0}); x.orders++; x.total += o.total; }); return Object.values(m).sort((x,y)=>y.total-x.total); };
+  const hours = new Array(24).fill(0), dow = new Array(7).fill(0), days = {};
+  list.forEach(o => { const k = ymd(new Date(o.ts)), e = days[k] || (days[k] = [k,0,0]); e[1]++; if(VALID(o)) e[2] += o.total; });
+  valid.forEach(o => { const d = new Date(o.ts); hours[d.getHours()]++; dow[d.getDay()]++; });
   const revSum = Object.values(prodMap).reduce((x,m)=>x+m.total,0) || 1;
+  const products = Object.values(prodMap).sort((x,y)=>y.qty-x.qty).map(m => ({...m, share:m.total/revSum*100}));
   return {
     list, revenue,
-    pay: bucket(o => PAY_AR[o.pay] || o.pay), city: bucket(o => o.city), src: bucket(o => SRC_AR[o.src] || o.src),
-    hours, dow, custNew: custList.length-returning, custRet: returning,
-    topCust: custList.sort((x,y)=>y.total-x.total).slice(0,5),
-    products: Object.values(prodMap).map(m => ({...m, share:m.total/revSum*100})),
+    pay: bucket(o => o.pay), city: bucket(o => o.city), src: bucket(o => o.src),
+    hours, dow, products, productsCount: products.length, top: products.slice(0,5),
+    series: Object.values(days).sort((x,y) => x[0]<y[0]?-1:1),
     orders: list.length,
     aov: valid.length ? revenue/valid.length : 0,
     lost: lost.length,
@@ -538,8 +526,7 @@ function aggregate(from, to){
       shipping: list.filter(o=>o.status==='shipping').length,
       canceled: list.filter(o=>o.status==='canceled').length,
       refunded: list.filter(o=>o.status==='refunded').length
-    },
-    top: Object.values(prodMap).sort((x,y)=>y.qty-x.qty).slice(0,5)
+    }
   };
 }
 function previousRange(from, to){
@@ -593,16 +580,16 @@ function buildSeries(from, to, gran){
   } else {
     for(let y=from.getFullYear(); y<=to.getFullYear(); y++) add(String(y), String(y));
   }
-  const keyOf = ts => { const d = new Date(ts); return gran==='day' ? ymd(d) : gran==='month' ? `${d.getFullYear()}-${d.getMonth()}` : String(d.getFullYear()); };
+  const keyOf = day => gran==='day' ? day : gran==='month' ? `${+day.slice(0,4)}-${+day.slice(5,7)-1}` : day.slice(0,4);
   return {labels, idx, keyOf, rev:new Array(keys.length).fill(0), cnt:new Array(keys.length).fill(0)};
 }
 
 function renderTrend(cur, from, to){
   const s = buildSeries(from, to, state.gran);
-  cur.list.forEach(o => {
-    const i = s.idx[s.keyOf(o.ts)];
+  (cur.series||[]).forEach(([day, n, rev]) => {
+    const i = s.idx[s.keyOf(day)];
     if(i===undefined) return;
-    s.cnt[i]++; if(VALID(o)) s.rev[i] += o.total;
+    s.cnt[i] += n; s.rev[i] += rev;
   });
   const ctx = $('#trend').getContext('2d');
   const g = ctx.createLinearGradient(0,0,0,300);
@@ -656,7 +643,7 @@ function renderOrders(){
   let rows = currentList.slice().sort((a,b)=>b.ts-a.ts);
   if(q) rows = rows.filter(o => String(o.id).includes(q) || o.customer.toLowerCase().includes(q));
   const shown = rows.slice(0,8);
-  $('#ordersCount').textContent = `عرض ${fmt(shown.length)} من ${fmt(rows.length)} طلب`;
+  $('#ordersCount').textContent = `عرض ${fmt(shown.length)} من ${fmt(rows.length)} طلب` + (LIVE ? ' · أحدث 30 طلباً' : '');
   $('#orders').innerHTML = shown.length ? shown.map(o => `
     <tr class="clickable" data-id="${o.id}" tabindex="0">
       <td class="oid">#${o.id}</td><td>${esc(o.customer)}</td><td>${fmtDate(o.ts)}</td>
@@ -683,10 +670,10 @@ $('#orders').addEventListener('click', e => { const tr = e.target.closest('tr[da
 $('#orders').addEventListener('keydown', e => { if(e.key==='Enter'){ const tr = e.target.closest('tr[data-id]'); if(tr) openOrder(tr.dataset.id); } });
 $('#orderDlg').addEventListener('click', e => { if(e.target.id==='orderDlg') e.target.close(); });
 
-function renderBars(sel, rows){
+function renderBars(sel, rows, map){
   const total = rows.reduce((s,r)=>s+r.total,0) || 1, max = rows.length ? rows[0].total : 1;
   $(sel).innerHTML = rows.length ? rows.slice(0,6).map(r => `
-    <li><div class="row"><b>${esc(r.k)}</b><span>${money(r.total)} ${CURRENCY} · ${(r.total/total*100).toFixed(1)}%</span></div>
+    <li><div class="row"><b>${esc((map&&map[r.k]) || (r.k==='unknown'?'غير محدد':r.k))}</b><span>${money(r.total)} ${CURRENCY} · ${(r.total/total*100).toFixed(1)}%</span></div>
     <div class="bar"><i style="width:${r.total/max*100}%"></i></div></li>`).join('') : '<li class="empty">لا توجد بيانات</li>';
 }
 const DOW_AR = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
@@ -703,20 +690,13 @@ function renderTime(cur){
   else timeChart = new Chart($('#timeChart'), {type:'bar', data, options:opts});
   document.querySelectorAll('#timeMode button').forEach(b => b.classList.toggle('on', b.dataset.m===timeMode));
 }
-function renderCustomers(cur){
-  $('#custNew').textContent = fmt(cur.custNew); $('#custRet').textContent = fmt(cur.custRet);
-  const max = cur.topCust.length ? cur.topCust[0].total : 1;
-  $('#topCust').innerHTML = cur.topCust.length ? cur.topCust.map(c => `
-    <li><div class="row"><b>${esc(c.name)}</b><span>${fmt(c.orders)} طلب · ${money(c.total)} ${CURRENCY}</span></div>
-    <div class="bar"><i style="width:${c.total/max*100}%"></i></div></li>`).join('') : '<li class="empty">لا توجد بيانات</li>';
-}
-let prodSort = 'qty', prodAll = false, prodRows = [];
+let prodSort = 'qty', prodAll = false, prodRows = [], prodTotal = 0;
 function renderProducts(){
   const q = $('#prodSearch').value.trim().toLowerCase();
-  let rows = prodRows.filter(r => PRODUCTS[r.pi].n.toLowerCase().includes(q)).sort((x,y) => y[prodSort]-x[prodSort]);
+  let rows = prodRows.filter(r => r.name.toLowerCase().includes(q)).sort((x,y) => y[prodSort]-x[prodSort]);
   const shown = prodAll ? rows : rows.slice(0,10);
-  $('#prodCount').textContent = `${fmt(rows.length)} منتج مباع في هذه الفترة`;
-  $('#prodRows').innerHTML = shown.length ? shown.map(r => `<tr><td><b>${esc(PRODUCTS[r.pi].n)}</b></td><td>${fmt(r.qty)}</td><td>${money(r.total)} ${CURRENCY}</td>
+  $('#prodCount').textContent = `${fmt(prodTotal)} منتج مباع في هذه الفترة` + (prodTotal>prodRows.length ? ` · يُعرض أكثر ${fmt(prodRows.length)} مبيعاً` : '');
+  $('#prodRows').innerHTML = shown.length ? shown.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${fmt(r.qty)}</td><td>${money(r.total)} ${CURRENCY}</td>
     <td style="min-width:120px"><div class="bar"><i style="width:${Math.min(100,r.share)}%"></i></div><small style="color:var(--muted)">${r.share.toFixed(1)}%</small></td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">لا توجد مبيعات مطابقة</td></tr>';
   $('#prodMore').hidden = rows.length<=10; $('#prodMore').textContent = prodAll ? 'عرض أقل' : `عرض الكل (${fmt(rows.length)})`;
@@ -727,12 +707,12 @@ document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEvent
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
 function renderTop(cur){
   const max = cur.top.length ? cur.top[0].qty : 1;
-  $('#top').innerHTML = cur.top.length ? cur.top.map((t,i) => {
-    const p = PRODUCTS[t.pi];
+  $('#top').innerHTML = cur.top.length ? cur.top.map((p,i) => {
+    const t = p;
     return `<li>
       <span class="rank">${i+1}</span>
-      <div class="pimg" aria-hidden="true">${p.img?`<img src="${esc(p.img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:14px">`:p.i}</div>
-      <div class="pinfo"><b>${p.n}</b><span>${fmt(t.qty)} مبيعة</span><div class="bar"><i style="width:${t.qty/max*100}%"></i></div></div>
+      <div class="pimg" aria-hidden="true">${p.img?`<img src="${esc(p.img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:14px">`:(p.icon||'🛍️')}</div>
+      <div class="pinfo"><b>${esc(p.name)}</b><span>${fmt(t.qty)} مبيعة</span><div class="bar"><i style="width:${t.qty/max*100}%"></i></div></div>
       <div class="ptot">${money(t.total)}<small>${CURRENCY}</small></div>
     </li>`;
   }).join('') : '<li class="empty" style="display:block;border:0">لا توجد مبيعات في هذه الفترة</li>';
@@ -744,27 +724,20 @@ function renderTop(cur){
 const QS = new URLSearchParams(location.search);
 const LIVE = location.protocol!=='file:' && !QS.has('demo') && !!QS.get('token');
 const CUR_SYMBOL = {SAR:'ر.س', USD:'$', AED:'د.إ', KWD:'د.ك', QAR:'ر.ق', BHD:'د.ب', OMR:'ر.ع', EGP:'ج.م'};
-let liveRange = null, liveSeq = 0;
-async function ensureLive(from, to){
-  if(!LIVE) return true;
-  const a = ymd(from), b = ymd(to);
-  if(liveRange && liveRange[0]<=a && liveRange[1]>=b) return true;
-  const res = await fetch(`/api/orders?from=${a}&to=${b}`, {headers:{authorization:'Bearer '+QS.get('token')}});
+let liveSeq = 0, syncInfo = null;
+async function api(path){
+  const res = await fetch(path, {headers:{authorization:'Bearer '+QS.get('token')}});
   if(!res.ok){ const err = new Error('HTTP '+res.status); err.status = res.status; throw err; }
-  const j = await res.json();
-  PRODUCTS.length = 0;
-  const idx = {};
-  ORDERS = j.orders.map(o => ({
-    id:o.id, customer:o.customer, cid:o.customerId, ts:o.ts, status:o.status, total:o.total, qty:o.qty,
+  return res.json();
+}
+// طلب من /api/recent إلى الشكل الذي تفهمه الجدول ونافذة التفاصيل
+function mapOrder(o, idx){
+  return {id:o.id, customer:o.customer, cid:o.customerId, ts:o.ts, status:o.status, total:o.total, qty:o.qty,
     pay:o.paymentMethod, city:o.city, src:o.source,
     lines:o.lines.map(l => {
       if(!(l.name in idx)){ idx[l.name] = PRODUCTS.length; PRODUCTS.push({n:l.name, i:'🛍️', p:l.price, img:l.img}); }
       return [idx[l.name], l.qty];
-    })
-  }));
-  CURRENCY = CUR_SYMBOL[j.currency] || j.currency || CURRENCY;
-  liveRange = [a, b];
-  return true;
+    })};
 }
 
 // Salla Embedded SDK (UMD، الاسم العام SallaEmbeddedSDK): init -> getToken -> التحقق في الخادم -> ready
@@ -783,37 +756,55 @@ function sessionExpired(){
   if(SDK) setTimeout(() => SDK.auth.refresh(), 600);
 }
 
+function renderSyncInfo(from){
+  const el = $('#syncInfo'); if(!el) return;
+  if(!LIVE || !syncInfo){ el.textContent = ''; return; }
+  const parts = [];
+  if(!syncInfo.backfillDone) parts.push(`جارٍ تحميل تاريخ المتجر من سلة${syncInfo.oldest?` (وصلنا إلى ${syncInfo.oldest})`:''}`);
+  if(syncInfo.oldest && ymd(from) < syncInfo.oldest) parts.push('بعض أيام هذه الفترة لم تُحمَّل بعد فالأرقام جزئية');
+  if(!syncInfo.inventoryReady) parts.push('جارٍ تجهيز المخزون وأسعار المنتجات');
+  el.textContent = parts.join(' · ');
+}
+
 async function update(){
   let [from, to] = rangeFor(state.preset);
   if(!from || !to || isNaN(from) || isNaN(to)) return;
   if(from>to) [from,to] = [to,from];
   const [pFrom, pTo, days] = previousRange(from, to);
   const seq = ++liveSeq;
-  try{ await ensureLive(pFrom, to); }
-  catch(e){ if(seq!==liveSeq) return; if(e.status===401) return sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); signalReady(); return; }
-  if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
-  const cur = aggregate(from, to), prev = aggregate(pFrom, pTo);
+  let cur, prev;
+  if(LIVE){
+    try{
+      const [s, r] = await Promise.all([api(`/api/summary?from=${ymd(from)}&to=${ymd(to)}`), api('/api/recent')]);
+      if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
+      cur = s.cur; cur.series = s.series; prev = s.prev; syncInfo = s.sync;
+      CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
+      PRODUCTS.length = 0; const idx = {};
+      currentList = r.orders.map(o => mapOrder(o, idx));
+    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); signalReady(); return; }
+  } else {
+    cur = aggregate(from, to); prev = aggregate(pFrom, pTo); currentList = cur.list; syncInfo = null;
+  }
   if(!state.granManual) state.gran = autoGran(days);
 
   $('#periodNote').innerHTML = `الفترة الحالية: <b>${fmtDate(from)}${days>1?' – '+fmtDate(to):''}</b> · مقارنةً بـ ${fmtDate(pFrom)}${days>1?' – '+fmtDate(pTo):''}`;
+  renderSyncInfo(from);
   renderKpis(cur, prev);
   renderTrend(cur, from, to);
   renderStatus(cur);
-  currentList = cur.list;
   renderOrders();
   renderTop(cur);
-  renderBars('#payBars', cur.pay); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src);
-  renderCustomers(cur); prodRows = cur.products; renderProducts();
+  renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
+  prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur};
   loadCustomerStats(from, to, cur);
-  loadShipments(from, to, cur);
   renderTime(cur);
   stamp();
   signalReady(); // تُرفع شاشة التحميل في لوحة سلة بعد أول عرض ناجح
 }
 
 /* ============ Inventory (GET /products/quantities عبر الـ Worker) ============ */
-let INV = [], invFilter = 'all', invAll = false, invError = false;
+let INV = [], invFilter = 'all', invAll = false, invError = false, invComplete = true;
 function demoInventory(){
   const stock = [0,3,12,47,5,120,2,60], sold = {};
   ORDERS.forEach(o => { if(VALID(o)) o.lines.forEach(([pi,q]) => sold[pi] = (sold[pi]||0)+q); });
@@ -823,12 +814,9 @@ async function loadInventory(){
   invError = false;
   try{
     if(LIVE){
-      const res = await fetch('/api/inventory', {headers:{authorization:'Bearer '+QS.get('token')}});
-      if(res.status===401) return sessionExpired();
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      INV = (await res.json()).items;
+      const j = await api('/api/inventory'); INV = j.items; invComplete = j.complete !== false;
     } else if(!INV.length) INV = demoInventory();
-  } catch(e){ invError = true; }
+  } catch(e){ if(e.status===401) return sessionExpired(); invError = true; }
   renderInventory();
 }
 const invState = it => it.unlimited ? 'ok' : it.qty<=0 ? 'out' : it.qty<=(Number($('#invLow').value)||0) ? 'low' : 'ok';
@@ -837,7 +825,7 @@ function renderInventory(){
   const out = INV.filter(i => invState(i)==='out').length, low = INV.filter(i => invState(i)==='low').length;
   $('#invOut').textContent = fmt(out); $('#invLowN').textContent = fmt(low);
   $('#invValue').textContent = money(INV.reduce((s,i) => s + (i.unlimited ? 0 : i.qty*i.price), 0)) + ' ' + CURRENCY;
-  $('#invCount').textContent = `${fmt(INV.length)} صنف`;
+  $('#invCount').textContent = `${fmt(INV.length)} صنف` + (invComplete ? '' : ' · جارٍ تحميل بقية المخزون من سلة…');
   const q = $('#invSearch').value.trim().toLowerCase(), rank = {out:0, low:1, ok:2};
   let rows = INV.filter(i => (invFilter==='all' || invState(i)===invFilter) && ((i.name+' '+i.variant+' '+i.sku).toLowerCase().includes(q)))
     .sort((a,b) => rank[invState(a)]-rank[invState(b)] || a.qty-b.qty);
@@ -867,12 +855,9 @@ async function loadCoupons(){
   cpnError = false;
   try{
     if(LIVE){
-      const res = await fetch('/api/coupons', {headers:{authorization:'Bearer '+QS.get('token')}});
-      if(res.status===401) return sessionExpired();
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      CPN = (await res.json()).coupons;
+      CPN = (await api('/api/coupons')).coupons;
     } else if(!CPN.length) CPN = demoCoupons();
-  } catch(e){ cpnError = true; }
+  } catch(e){ if(e.status===401) return sessionExpired(); cpnError = true; }
   renderCoupons();
 }
 function renderCoupons(){
@@ -895,17 +880,15 @@ function renderCoupons(){
 }
 let custSeq = 0;
 async function loadCustomerStats(from, to, cur){
-  const seq = ++custSeq, el = $('#custTotals');
+  const seq = ++custSeq;
   let total = null, inRange = null;
   try{
-    if(LIVE){
-      const res = await fetch(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`, {headers:{authorization:'Bearer '+QS.get('token')}});
-      if(res.ok){ const j = await res.json(); total = j.total; inRange = j.inRange; }
-      else if(res.status===401) return;
-    } else { total = new Set(ORDERS.map(o => o.cid)).size; inRange = cur.custNew; }
-  } catch(e){}
+    if(LIVE){ const j = await api(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`); total = j.total; inRange = j.inRange; }
+    else { total = new Set(ORDERS.map(o => o.cid)).size; inRange = new Set(cur.list.map(o => o.cid)).size; }
+  } catch(e){ if(e.status===401) return; }
   if(seq!==custSeq) return;
-  el.textContent = total===null && inRange===null ? '' : `إجمالي العملاء المسجلين: ${total===null?'—':fmt(total)} · سجّلوا في هذه الفترة: ${inRange===null?'—':fmt(inRange)}`;
+  $('#custTotal').textContent = total===null ? '—' : fmt(total);
+  $('#custInRange').textContent = inRange===null ? '—' : fmt(inRange);
 }
 
 /* ============ Shipments (GET /shipments) ============ */
@@ -921,20 +904,17 @@ function demoShipments(list){
     const st = o.status==='refunded' ? 'return_to_origin' : o.status==='shipping' ? (k%4===0?'in_transit':'delivering') : (k%23===0 ? bad[k%4] : 'delivered');
     return {id:'SH'+o.id, courier:couriers[k%5], status:st, group:shipGroup(st), cod:o.pay==='cod', city:o.city||'', tracking:'TRK'+o.id, link:'', total:o.total}; });
 }
-async function loadShipments(from, to, cur){
+async function loadShipments(){
   const seq = ++shpSeq; let rows = null, err = false, truncated = false;
   try{
     if(LIVE){
-      const res = await fetch(`/api/shipments?from=${ymd(from)}&to=${ymd(to)}`, {headers:{authorization:'Bearer '+QS.get('token')}});
-      if(res.status===401) return;
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const j = await res.json(); rows = j.shipments.map(x => ({...x, group:x.group||shipGroup(x.status)})); truncated = !!j.truncated;
-    } else rows = demoShipments(cur.list);
-  } catch(e){ err = true; }
+      const j = await api('/api/shipments'); rows = j.shipments.map(x => ({...x, group:x.group||shipGroup(x.status)})); truncated = !!j.truncated;
+    } else rows = demoShipments(ORDERS.filter(o => o.ts >= TODAY.getTime()-6*DAY));
+  } catch(e){ if(e.status===401) return; err = true; }
   if(seq!==shpSeq) return;
   if(err){ $('#shpCount').textContent = 'تعذّر تحميل الشحنات'; $('#shpAttn').innerHTML = '<tr><td colspan="4" class="empty">تأكد من تفعيل صلاحية shipping.read للتطبيق</td></tr>'; return; }
   const g = x => rows.filter(r => r.group===x).length;
-  $('#shpCount').textContent = `${fmt(rows.length)} شحنة في هذه الفترة`;
+  $('#shpCount').textContent = `${fmt(rows.length)} شحنة خلال آخر 7 أيام`;
   $('#shpDel').textContent = fmt(g('delivered')); $('#shpTr').textContent = fmt(g('transit')); $('#shpRet').textContent = fmt(g('returned')); $('#shpBad').textContent = fmt(g('failed'));
   const by = {}; rows.forEach(r => { const c = by[r.courier] || (by[r.courier] = {k:r.courier, n:0, d:0, cod:0}); c.n++; if(r.group==='delivered') c.d++; if(r.cod) c.cod++; });
   const list = Object.values(by).sort((a,b) => b.n-a.n).slice(0,6), max = list.length ? list[0].n : 1;
@@ -943,14 +923,14 @@ async function loadShipments(from, to, cur){
   $('#shpAttn').innerHTML = attn.length ? attn.map(r => `<tr><td class="oid">${r.link?`<a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${esc(r.tracking||r.id)}</a>`:esc(r.tracking||r.id)}</td><td>${esc(r.courier)}</td><td>${esc(r.city||'—')}</td>
     <td><span class="badge ${r.group==='failed'?'b-canceled':'b-refunded'}">${esc(SHIP_AR[r.status]||r.statusLabel||r.status)}</span></td></tr>`).join('') : '<tr><td colspan="4" class="empty">لا توجد شحنات متعثّرة 🎉</td></tr>';
   const cod = rows.filter(r => r.cod).length;
-  $('#shpNote').textContent = rows.length ? `الدفع عند الاستلام: ${fmt(cod)} شحنة (${(cod/rows.length*100).toFixed(0)}%)` + (truncated ? ' · عُرض جزء من الشحنات فقط (الفترة طويلة)' : '') : '';
+  $('#shpNote').textContent = rows.length ? `الدفع عند الاستلام: ${fmt(cod)} شحنة (${(cod/rows.length*100).toFixed(0)}%)` + (truncated ? ' · عُرض جزء من الشحنات فقط (الحجم كبير)' : '') : '';
 }
 
 /* ============ Auto refresh ============ */
 function stamp(){
   $('#lastUpdated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA-u-nu-latn', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) + (LIVE ? '' : ' (بيانات تجريبية)');
 }
-async function refreshNow(){ liveRange = null; await Promise.all([update(), loadInventory(), loadCoupons()]); }
+async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments()]); }
 let autoTimer = null;
 function scheduleAuto(){
   clearInterval(autoTimer);
@@ -1013,8 +993,12 @@ $('#export').addEventListener('click', () => {
     ['الطلبات الملغية/المسترجعة', v.cur.lost], ['المنتجات المباعة', v.cur.sold], [],
     ['رقم الطلب','العميل','التاريخ','الحالة','الإجمالي']
   ].map(r => r.map(q).join(','));
-  v.cur.list.slice().sort((a,b)=>b.ts-a.ts).forEach(o =>
-    lines.push([o.id, o.customer, ymd(new Date(o.ts)), STATUS_AR[o.status], o.total].map(q).join(',')));
+  if(v.cur.list){
+    v.cur.list.slice().sort((a,b)=>b.ts-a.ts).forEach(o => lines.push([o.id, o.customer, ymd(new Date(o.ts)), STATUS_AR[o.status], o.total].map(q).join(',')));
+  } else {   // الوضع الحي: ملخص يومي بدل قائمة الطلبات
+    lines.length -= 1; lines.push(['اليوم','عدد الطلبات','المبيعات'].map(q).join(','));
+    (v.cur.series||[]).forEach(r => lines.push(r.map(q).join(',')));
+  }
   const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `sales-report_${ymd(v.from)}_${ymd(v.to)}.csv`;
@@ -1039,6 +1023,7 @@ async function boot(){
   setPreset('month');
   loadInventory();
   loadCoupons();
+  loadShipments();
   scheduleAuto();
 }
 </script>

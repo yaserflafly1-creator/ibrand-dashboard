@@ -39,6 +39,8 @@ export function normalizeOrder(o) {
     source: o.source || '',
     customer: o.customer?.full_name || [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || 'عميل',
     ts: parseSallaDate(o.date),
+    day: String(o.date?.date || '').slice(0, 10),   // التاريخ المحلي (الرياض) كما تعيده سلة
+    hour: Number(String(o.date?.date || '').slice(11, 13)) || 0,
     status: mapStatus(o.status?.slug),
     draft: !!o.draft,
     total,

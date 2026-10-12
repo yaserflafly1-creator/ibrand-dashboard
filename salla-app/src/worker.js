@@ -1,4 +1,19 @@
-import { normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon, normalizeShipment } from './salla.js';
+import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
+import { sumDays, seriesOf } from './agg.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory } from './db.js';
+import { syncMerchant, priceMap, priceLines, addDays, riyadhDay } from './sync.js';
+
+/* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
+const memoStore = new Map();
+async function memo(key, ttlMs, fn) {
+  const hit = memoStore.get(key);
+  if (hit && hit.exp > Date.now()) return hit.v;
+  const v = await fn();
+  if (memoStore.size > 500) memoStore.clear();
+  memoStore.set(key, { v, exp: Date.now() + ttlMs });
+  return v;
+}
+export const __clearMemo = () => memoStore.clear();
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -48,6 +63,8 @@ const loadTokens = async (env, merchant) => JSON.parse((await env.TOKENS.get(`me
 async function merchantFromEmbeddedToken(req, env) {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || new URL(req.url).searchParams.get('token');
   if (!token || !env.SALLA_APP_ID) return null;
+  const cached = memoStore.get('tok:' + token);
+  if (cached && cached.exp > Date.now()) return cached.v;
   // وثيقة Authentication (التطبيقات المضمَّنة): POST + ترويسة S-Source = app id، والجسم { token } فقط
   const r = await fetch(env.SALLA_INTROSPECT_URL, {
     method: 'POST',
@@ -61,9 +78,12 @@ async function merchantFromEmbeddedToken(req, env) {
   const id = d?.merchant_id ?? d?.store_id;
   if (!j?.success || !id) return null;
   if (d.app_id !== undefined && String(d.app_id) !== String(env.SALLA_APP_ID)) return null; // توكن تطبيق آخر
-  if (d.exp && Date.parse(d.exp) < Date.now()) return null;                                  // منتهي
+  const expMs = d.exp ? Date.parse(d.exp) : Infinity;
+  if (expMs < Date.now()) return null;                                                      // منتهي
   // [VERIFY] نفترض أن merchant_id هو نفسه حقل merchant في الـ webhooks (نؤكده بتجربة فعلية)
-  return String(id);
+  const merchant = String(id);
+  memoStore.set('tok:' + token, { v: merchant, exp: Math.min(expMs, Date.now() + 120e3) });
+  return merchant;
 }
 
 /* ---------- نداءات Salla مع تجديد التوكن ---------- */
@@ -98,28 +118,8 @@ function makeClient(env, merchant, tokens) {
   };
 }
 
-/* ---------- /api/orders ---------- */
-const PER_PAGE = 30;      // الحد الأقصى المسموح (وثيقة List Orders)
-const MAX_PAGES = 300;    // سقف أمان لعدد النداءات
-const CACHE_TTL_LIVE = 60;    // ثوانٍ، للفترات التي تشمل اليوم
-const CACHE_TTL_PAST = 600;   // للفترات المنتهية
-const CATALOG_TTL = 3600;
-const todayRiyadh = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
-
-// كتالوج المنتجات (format=light) لأسعار «الأكثر مبيعاً». يحتاج صلاحية products.read
-async function loadCatalog(env, merchant, get) {
-  const key = `catalog:${merchant}`;
-  const hit = await env.TOKENS.get(key);
-  if (hit) return JSON.parse(hit);
-  const products = [];
-  for (let page = 1; page <= 60; page++) {
-    const j = await get('/products', { format: 'light', per_page: 30, page });
-    (j.data || []).forEach((p) => products.push({ name: p.name, price: p.price, sale_price: p.sale_price, thumbnail: p.thumbnail, image: p.image }));
-    if (page >= (j.pagination?.totalPages ?? 1)) break;
-  }
-  await env.TOKENS.put(key, JSON.stringify(products), { expirationTtl: CATALOG_TTL });
-  return products;
-}
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validRange = (q) => DATE_RE.test(q.get('from') || '') && DATE_RE.test(q.get('to') || '');
 
 // تحقق الهوية + تجهيز عميل سلة؛ يرجع { res } عند الفشل أو { merchant, get } عند النجاح
 async function authContext(req, env) {
@@ -130,67 +130,89 @@ async function authContext(req, env) {
   return { merchant, get: makeClient(env, merchant, tokens) };
 }
 
-const cachedJson = (body) => new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
-
-/* ---------- /api/inventory ---------- */
-async function handleInventory(req, env) {
-  const ctx = await authContext(req, env);
-  if (ctx.res) return ctx.res;
-  const key = `inventory:${ctx.merchant}`;
-  const hit = await env.TOKENS.get(key);
-  if (hit) return cachedJson(hit);
-  const items = [];
-  // الوثيقة لا تذكر per_page لهذه النقطة، فنمرّ على كل الصفحات بالتسلسل
-  for (let page = 1; page <= 100; page++) {
-    const j = await ctx.get('/products/quantities', { page });
-    (j.data || []).forEach((p) => items.push(normalizeInventoryItem(p)));
-    if (page >= (j.pagination?.totalPages ?? 1)) break;
-  }
-  const body = JSON.stringify({ items });
-  await env.TOKENS.put(key, body, { expirationTtl: 120 });
-  return cachedJson(body);
-}
-
-/* ---------- /api/shipments ---------- */
-async function handleShipments(req, env) {
+/* ---------- /api/summary: أرقام الفترة والفترة السابقة من الملخصات اليومية ---------- */
+async function handleSummary(req, env) {
   const ctx = await authContext(req, env);
   if (ctx.res) return ctx.res;
   const q = new URL(req.url).searchParams;
-  const from = q.get('from'), to = q.get('to');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
-  const key = `shipments:${ctx.merchant}:${from}:${to}`;
-  const hit = await env.TOKENS.get(key);
-  if (hit) return cachedJson(hit);
-  const shipments = [];
-  let truncated = false;
-  // [VERIFY] أقصى per_page لهذه النقطة غير مذكور؛ نستخدم 30 كما في الطلبات
-  for (let page = 1; ; page++) {
-    if (page > 100) { truncated = true; break; }
-    const j = await ctx.get('/shipments', { from_date: from, to_date: to, per_page: 30, page });
-    (j.data || []).forEach((s) => shipments.push(normalizeShipment(s)));
-    if (page >= (j.pagination?.totalPages ?? 1)) break;
-  }
-  const body = JSON.stringify({ shipments, truncated });
-  if (!truncated) await env.TOKENS.put(key, body, { expirationTtl: to >= todayRiyadh() ? CACHE_TTL_LIVE : CACHE_TTL_PAST });
-  return cachedJson(body);
+  if (!validRange(q)) return json({ error: 'bad range' }, 400);
+  let from = q.get('from'), to = q.get('to');
+  if (from > to) [from, to] = [to, from];
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
+  if (days > 800) return json({ error: 'range too long' }, 400);
+  const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(days - 1));
+
+  await ensureSchema(env.DB);
+  const rows = await rangeRows(env.DB, ctx.merchant, prevFrom, to);
+  const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
+  const state = await getMeta(env.DB, ctx.merchant, 'state', {});
+  const cov = await coverage(env.DB, ctx.merchant);
+  return json({
+    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows),
+    currency: state.currency || 'SAR',
+    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0 }
+  });
+}
+
+/* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
+async function handleRecent(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const body = await memo(`recent:${ctx.merchant}`, 30e3, async () => {
+    await ensureSchema(env.DB);
+    const j = await ctx.get('/orders', { per_page: 30, page: 1, sort_by: 'created_at-desc' });
+    const map = await priceMap(env.DB, ctx.merchant);
+    const orders = (j.data || []).map(normalizeOrder).filter((o) => !o.draft && o.status !== 'unpaid');
+    orders.forEach((o) => priceLines(o, map));
+    return { orders };
+  });
+  return json(body);
+}
+
+/* ---------- /api/inventory: من جدول D1 الذي تملؤه المزامنة ---------- */
+async function handleInventory(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  await ensureSchema(env.DB);
+  const state = await getMeta(env.DB, ctx.merchant, 'state', {});
+  return json({ items: await readInventory(env.DB, ctx.merchant), complete: !!state.invDoneOnce, updatedAt: state.invUpdatedAt || 0 });
+}
+
+/* ---------- /api/shipments: آخر 7 أيام دائماً (حجم الشحنات كحجم الطلبات) ---------- */
+const SHIPMENT_DAYS = 7, SHIPMENT_MAX_PAGES = 40;
+async function handleShipments(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const to = riyadhDay(Date.now()), from = addDays(to, -(SHIPMENT_DAYS - 1));
+  const body = await memo(`ship:${ctx.merchant}:${to}`, 300e3, async () => {
+    const shipments = [];
+    let truncated = false;
+    // [VERIFY] أقصى per_page لهذه النقطة غير مذكور؛ نستخدم 30 كما في الطلبات
+    for (let page = 1; ; page++) {
+      if (page > SHIPMENT_MAX_PAGES) { truncated = true; break; }
+      const j = await ctx.get('/shipments', { from_date: from, to_date: to, per_page: 30, page });
+      (j.data || []).forEach((s) => shipments.push(normalizeShipment(s)));
+      if (page >= (j.pagination?.totalPages ?? 1)) break;
+    }
+    return { shipments, truncated, days: SHIPMENT_DAYS };
+  });
+  return json(body);
 }
 
 /* ---------- /api/coupons ---------- */
 async function handleCoupons(req, env) {
   const ctx = await authContext(req, env);
   if (ctx.res) return ctx.res;
-  const key = `coupons:${ctx.merchant}`;
-  const hit = await env.TOKENS.get(key);
-  if (hit) return cachedJson(hit);
-  const coupons = [];
-  for (let page = 1; page <= 50; page++) {
-    const j = await ctx.get('/coupons', { page });
-    (j.data || []).forEach((c) => { if (c.status !== 'deleted') coupons.push(normalizeCoupon(c)); });
-    if (page >= (j.pagination?.totalPages ?? 1)) break;
-  }
-  const body = JSON.stringify({ coupons });
-  await env.TOKENS.put(key, body, { expirationTtl: 120 });
-  return cachedJson(body);
+  const body = await memo(`coupons:${ctx.merchant}`, 300e3, async () => {
+    const coupons = [];
+    for (let page = 1; page <= 30; page++) {
+      const j = await ctx.get('/coupons', { page });
+      (j.data || []).forEach((c) => { if (c.status !== 'deleted') coupons.push(normalizeCoupon(c)); });
+      if (page >= (j.pagination?.totalPages ?? 1)) break;
+    }
+    return { coupons };
+  });
+  return json(body);
 }
 
 /* ---------- /api/customers: إجمالي المسجلين + المسجلون في فترة (صلاحية customers.read) ---------- */
@@ -198,53 +220,31 @@ async function handleCustomers(req, env) {
   const ctx = await authContext(req, env);
   if (ctx.res) return ctx.res;
   const q = new URL(req.url).searchParams;
+  if (!validRange(q)) return json({ error: 'bad range' }, 400);
   const from = q.get('from'), to = q.get('to');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
-  const key = `customers:${ctx.merchant}:${from}:${to}`;
-  const hit = await env.TOKENS.get(key);
-  if (hit) return cachedJson(hit);
-  // [VERIFY] قسم pagination في هذه النقطة موصوف cursor-based في الوثيقة؛ نقرأ total إن وُجد وإلا null
-  const [all, ranged] = await Promise.all([
-    ctx.get('/customers', { page: 1 }),
-    ctx.get('/customers', { page: 1, date_from: from, date_to: to })
-  ]);
-  const body = JSON.stringify({ total: all.pagination?.total ?? null, inRange: ranged.pagination?.total ?? null });
-  await env.TOKENS.put(key, body, { expirationTtl: 120 });
-  return cachedJson(body);
+  const body = await memo(`cust:${ctx.merchant}:${from}:${to}`, 300e3, async () => {
+    // [VERIFY] قسم pagination في هذه النقطة موصوف cursor-based في الوثيقة؛ نقرأ total إن وُجد وإلا null
+    const [all, ranged] = await Promise.all([
+      ctx.get('/customers', { page: 1 }),
+      ctx.get('/customers', { page: 1, date_from: from, date_to: to })
+    ]);
+    return { total: all.pagination?.total ?? null, inRange: ranged.pagination?.total ?? null };
+  });
+  return json(body);
 }
 
-async function handleOrders(req, env) {
-  const ctx = await authContext(req, env);
-  if (ctx.res) return ctx.res;
-  const { merchant, get } = ctx;
-
-  const q = new URL(req.url).searchParams;
-  const from = q.get('from'), to = q.get('to');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
-
-  const cacheKey = `orders:${merchant}:${from}:${to}`;
-  const cached = await env.TOKENS.get(cacheKey);
-  if (cached) return new Response(cached, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
-
-  const orders = [];
-  let truncated = false;
-  // الصفحات تُجلب بالتسلسل ولا تُتخطى (قيد من سلة)، والتصفية بالتاريخ تقلل العدد
-  for (let page = 1; ; page++) {
-    if (page > MAX_PAGES) { truncated = true; break; }
-    const j = await get('/orders', { from_date: from, to_date: to, per_page: PER_PAGE, page });
-    (j.data || []).forEach((o) => { const n = normalizeOrder(o); if (!n.draft && n.status !== 'unpaid') orders.push(n); });
-    if (page >= (j.pagination?.totalPages ?? 1)) break;
+/* ---------- Cron: المزامنة لكل تاجر مثبّت ---------- */
+export async function syncAll(env, now = Date.now()) {
+  const { keys } = await env.TOKENS.list({ prefix: 'merchant:' });
+  const out = [];
+  for (const k of keys) {
+    const merchant = k.name.slice('merchant:'.length);
+    const tokens = await loadTokens(env, merchant);
+    if (!tokens) continue;
+    try { out.push([merchant, await syncMerchant(env, merchant, { get: makeClient(env, merchant, tokens) }, now)]); }
+    catch (e) { out.push([merchant, { error: String(e.message || e) }]); }
   }
-
-  let pricesEstimated = true;
-  try {
-    const { matched, total } = applyCatalog(orders, buildPriceMap(await loadCatalog(env, merchant, get)));
-    pricesEstimated = matched < total;
-  } catch { /* بدون products.read نبقى على تقدير السعر */ }
-
-  const body = JSON.stringify({ orders, currency: orders[0]?.currency || 'SAR', truncated, pricesEstimated });
-  if (!truncated) await env.TOKENS.put(cacheKey, body, { expirationTtl: to >= todayRiyadh() ? CACHE_TTL_LIVE : CACHE_TTL_PAST });
-  return new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+  return out;
 }
 
 export default {
@@ -252,7 +252,8 @@ export default {
     const { pathname } = new URL(req.url);
     try {
       if (pathname === '/webhook' && req.method === 'POST') return await handleWebhook(req, env);
-      if (pathname === '/api/orders' && req.method === 'GET') return await handleOrders(req, env);
+      if (pathname === '/api/summary' && req.method === 'GET') return await handleSummary(req, env);
+      if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
       if (pathname === '/api/coupons' && req.method === 'GET') return await handleCoupons(req, env);
       if (pathname === '/api/shipments' && req.method === 'GET') return await handleShipments(req, env);
@@ -261,5 +262,8 @@ export default {
       return json({ error: 'server_error', message: String(e.message || e) }, 502);
     }
     return env.ASSETS.fetch(req);
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(syncAll(env, event.scheduledTime));
   }
 };
