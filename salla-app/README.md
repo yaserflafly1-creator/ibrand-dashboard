@@ -28,6 +28,10 @@
 - نقطة التحقق من توكن التطبيق المضمَّن (introspect) وشكل استجابتها، وطريقة تمرير التوكن للصفحة.
 - ترويسات السماح بعرض الصفحة داخل iframe سلة (frame-ancestors) إن لزم.
 
+## النشر التلقائي (Cloudflare Workers Builds)
+بعد ربط المستودع بـ Cloudflare (Settings ← Builds ← Connect to Git): الفرع `claude/sales-dashboard-interactive-9jkl6a`، والمجلد الجذر `salla-app`، وأمر النشر `npx wrangler deploy`. بعدها يُنشر كل تعديل يُدفع إلى الفرع تلقائياً دون نسخ ملفات.
+المعرّفات في `wrangler.toml` ليست أسراراً؛ أما `SALLA_CLIENT_ID` و`SALLA_CLIENT_SECRET` و`SALLA_WEBHOOK_SECRET` فتبقى في Cloudflare ولا تدخل المستودع أبداً.
+
 ## جلسة التطبيق المضمَّن
 - عند ردّ `401` من `/api/orders` تستدعي الصفحة `embedded.auth.refresh()` (من `@salla.sa/embedded-sdk`) لإعادة تحميل الإطار بتوكن جديد، مع حارس 30 ثانية ضد الحلقات.
 - الـ SDK يُحمَّل من unpkg بنسخة مثبَّتة (`@salla.sa/embedded-sdk@0.2.6`، UMD، الاسم العام `SallaEmbeddedSDK`). التسلسل: `embedded.init()` ثم قراءة `?token=` (كما يفعل `auth.getToken()`) ثم التحقق في الخادم ثم `embedded.ready()` بعد أول عرض ناجح.
