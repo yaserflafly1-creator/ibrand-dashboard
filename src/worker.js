@@ -32,7 +32,7 @@ async function handleWebhook(req, env) {
   if (!merchant) return json({ ok: true });
 
   if (evt.event === 'app.store.authorize') {
-    // [VERIFY] (صفحة App Events) data.access_token / refresh_token / expires (Easy Mode)
+    // وثيقة App Events: data = { access_token, expires (epoch بالثواني), refresh_token, scope, token_type }
     const d = evt.data || {};
     await saveTokens(env, merchant, { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: Number(d.expires) * 1000 || 0 });
   } else if (evt.event === 'app.uninstalled') {
@@ -80,6 +80,8 @@ async function refresh(env, merchant, t) {
 function makeClient(env, merchant, tokens) {
   let t = tokens;
   return async function sallaGet(path, params = {}) {
+    // تجديد استباقي قبل انتهاء صلاحية التوكن بدقيقة
+    if (t.refresh_token && t.expires_at && t.expires_at < Date.now() + 60000) t = await refresh(env, merchant, t);
     const url = new URL(env.SALLA_API_BASE + path);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const call = () => fetch(url, { headers: { authorization: `Bearer ${t.access_token}`, accept: 'application/json' } });

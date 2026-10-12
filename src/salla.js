@@ -1,5 +1,5 @@
 // محوّل بيانات سلة -> الشكل الذي تفهمه اللوحة.
-// الحقول مطابقة لوثيقة List Orders (GET /orders). ما زال موسوماً [VERIFY] ما لم تؤكده الوثائق بعد.
+// الحقول مطابقة لوثائق List Orders وList Order Statuses وProducts List.
 
 // الـ slugs من وثيقة List Order Statuses. الحالات المخصصة من التاجر تحمل slug الحالة الأصلية.
 const COMPLETED = ['completed', 'delivered'];

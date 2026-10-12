@@ -23,3 +23,13 @@ test('token strategy compares Authorization with secret', async () => {
   assert.equal((await worker.fetch(post({ 'x-salla-security-strategy': 'token', authorization: 's3cret' }), env)).status, 200);
   assert.equal((await worker.fetch(post({ 'x-salla-security-strategy': 'token', authorization: 'nope' }), env)).status, 401);
 });
+test('authorize stores epoch expiry in ms; uninstall deletes tokens', async () => {
+  const env = { SALLA_WEBHOOK_SECRET: 's3cret', TOKENS: kv() };
+  const h = async (b) => ({ 'x-salla-signature': await sign('s3cret', b) });
+  await worker.fetch(new Request('https://x.test/webhook', { method: 'POST', body, headers: await h(body) }), env);
+  const saved = JSON.parse(env.TOKENS.m.get('merchant:123'));
+  assert.deepEqual([saved.access_token, saved.refresh_token, saved.expires_at], ['a', 'r', 1900000000000]);
+  const un = JSON.stringify({ event: 'app.uninstalled', merchant: 123, data: {} });
+  await worker.fetch(new Request('https://x.test/webhook', { method: 'POST', body: un, headers: await h(un) }), env);
+  assert.equal(env.TOKENS.m.has('merchant:123'), false);
+});
