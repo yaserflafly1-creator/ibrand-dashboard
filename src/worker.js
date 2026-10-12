@@ -1,4 +1,4 @@
-import { normalizeOrder } from './salla.js';
+import { normalizeOrder, buildPriceMap, applyCatalog } from './salla.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -94,6 +94,22 @@ function makeClient(env, merchant, tokens) {
 const PER_PAGE = 30;      // الحد الأقصى المسموح (وثيقة List Orders)
 const MAX_PAGES = 300;    // سقف أمان لعدد النداءات
 const CACHE_TTL = 300;    // ثوانٍ
+const CATALOG_TTL = 3600;
+
+// كتالوج المنتجات (format=light) لأسعار «الأكثر مبيعاً». يحتاج صلاحية products.read
+async function loadCatalog(env, merchant, get) {
+  const key = `catalog:${merchant}`;
+  const hit = await env.TOKENS.get(key);
+  if (hit) return JSON.parse(hit);
+  const products = [];
+  for (let page = 1; page <= 60; page++) {
+    const j = await get('/products', { format: 'light', per_page: 30, page });
+    (j.data || []).forEach((p) => products.push({ name: p.name, price: p.price, sale_price: p.sale_price, thumbnail: p.thumbnail, image: p.image }));
+    if (page >= (j.pagination?.totalPages ?? 1)) break;
+  }
+  await env.TOKENS.put(key, JSON.stringify(products), { expirationTtl: CATALOG_TTL });
+  return products;
+}
 
 async function handleOrders(req, env) {
   const merchant = await merchantFromEmbeddedToken(req, env);
@@ -120,7 +136,13 @@ async function handleOrders(req, env) {
     if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
 
-  const body = JSON.stringify({ orders, currency: orders[0]?.currency || 'SAR', truncated });
+  let pricesEstimated = true;
+  try {
+    const { matched, total } = applyCatalog(orders, buildPriceMap(await loadCatalog(env, merchant, get)));
+    pricesEstimated = matched < total;
+  } catch { /* بدون products.read نبقى على تقدير السعر */ }
+
+  const body = JSON.stringify({ orders, currency: orders[0]?.currency || 'SAR', truncated, pricesEstimated });
   if (!truncated) await env.TOKENS.put(cacheKey, body, { expirationTtl: CACHE_TTL });
   return new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }

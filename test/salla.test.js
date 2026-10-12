@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapStatus, parseSallaDate, normalizeOrder } from '../src/salla.js';
+import { mapStatus, parseSallaDate, normalizeOrder, buildPriceMap, applyCatalog } from '../src/salla.js';
 
 test('mapStatus', () => {
   assert.equal(mapStatus('completed'), 'completed');
@@ -25,4 +25,13 @@ test('normalizeOrder follows List Orders shape', () => {
   assert.equal(o.lines.length, 2);
   assert.equal(o.lines[0].price, 16.39 / 2);
   assert.equal(o.lines[1].img, '');
+});
+test('applyCatalog prices lines by product name (sale price wins)', () => {
+  const orders = [normalizeOrder({ id: 1, total: { amount: 100 }, items: [{ name: 'Dress', quantity: 2 }, { name: 'Unknown', quantity: 1 }] })];
+  const map = buildPriceMap([{ name: 'dress ', price: { amount: 60 }, sale_price: { amount: 45 }, thumbnail: 't.png' }]);
+  const r = applyCatalog(orders, map);
+  assert.deepEqual(r, { matched: 1, total: 2 });
+  assert.equal(orders[0].lines[0].price, 45);
+  assert.equal(orders[0].lines[0].img, 't.png');
+  assert.equal(orders[0].lines[1].price, 100 / 3);
 });

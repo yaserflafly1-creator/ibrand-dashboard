@@ -45,3 +45,26 @@ export function normalizeOrder(o) {
     }))
   };
 }
+
+// Products List (format=light): name, price.amount, sale_price.amount, thumbnail
+export function buildPriceMap(products) {
+  const map = new Map();
+  for (const p of products || []) {
+    if (!p?.name) continue;
+    const sale = Number(p.sale_price?.amount) || 0;
+    const price = sale > 0 ? sale : Number(p.price?.amount) || 0;
+    if (price > 0) map.set(String(p.name).trim().toLowerCase(), { price, img: p.thumbnail || p.image?.url || '' });
+  }
+  return map;
+}
+
+// يستبدل تقدير السعر بسعر المنتج الحالي من الكتالوج عند تطابق الاسم؛ يرجع عدد البنود المطابقة
+export function applyCatalog(orders, map) {
+  let matched = 0, total = 0;
+  for (const o of orders) for (const l of o.lines) {
+    total++;
+    const hit = map.get(String(l.name).trim().toLowerCase());
+    if (hit) { l.price = hit.price; l.img = l.img || hit.img; matched++; }
+  }
+  return { matched, total };
+}
