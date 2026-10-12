@@ -5,6 +5,7 @@ import { emptyDay, addOrder, roundDay } from './agg.js';
 import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory } from './db.js';
 
 const DAY = 864e5;
+const SCHEMA = 2;
 export const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 export const riyadhDay = (ms) => new Date(ms + 3 * 3600e3).toISOString().slice(0, 10);
 const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / DAY) + 1;
@@ -101,6 +102,8 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const today = riyadhDay(now);
   const floor = addDays(today, -(Number(env.BACKFILL_DAYS) || 400));
   state.ppd = state.ppd || 5;
+  // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
+  if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); }
   state.invGen = state.invGen || 1;
   const log = [];
 

@@ -77,3 +77,18 @@ test('a locked merchant is skipped', async () => {
   await setMeta(env.DB, 'm1', 'state', { lockUntil: NOW + 30000 });
   assert.deepEqual(await syncMerchant(env, 'm1', { get }, NOW + 1000), { skipped: 'locked' });
 });
+
+test('schema bump restarts the backfill once', async () => {
+  clearPriceCache();
+  const env = setup({ BACKFILL_DAYS: '5' });
+  const get = fakeSalla({ perDay: 2 });
+  for (let i = 0; i < 12; i++) await syncMerchant(env, 'm1', { get }, NOW + i * 60000);
+  let st = await getMeta(env.DB, 'm1', 'state', {});
+  assert.equal(st.backfillDone, true);
+  const { setMeta } = await import('../src/db.js');
+  await setMeta(env.DB, 'm1', 'state', { ...st, schema: 1 });          // محاكاة صفوف بالشكل القديم
+  await syncMerchant(env, 'm1', { get }, NOW + 13 * 60000);
+  st = await getMeta(env.DB, 'm1', 'state', {});
+  assert.equal(st.schema, 2);
+  assert.ok(st.backfillDone === false || st.backfillNext !== null || st.resyncNext, 'backfill restarted');
+});

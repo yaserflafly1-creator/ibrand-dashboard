@@ -43,7 +43,9 @@ test('summary: current vs previous period from daily aggregates; auth enforced',
   const j = await (await get(env, '/api/summary?from=2026-10-11&to=2026-10-12')).json();
   assert.deepEqual([j.cur.revenue, j.cur.orders, j.cur.valid, j.cur.aov], [600, 3, 3, 200]);
   assert.deepEqual([j.prev.revenue, j.prev.orders, j.prev.lost], [100, 2, 1]);   // 9–10 أكتوبر
-  assert.deepEqual(j.series, [['2026-10-11', 1, 200], ['2026-10-12', 2, 400]]);
+  assert.deepEqual(j.series.map((x) => x.slice(0, 3)), [['2026-10-11', 1, 200], ['2026-10-12', 2, 400]]);
+  assert.deepEqual(j.series[0].slice(3), [0, 0, 0, 0]);
+  assert.deepEqual([j.cur.lostDetail.canceled.count, j.cur.lostDetail.refunded.count], [0, 0]);
   assert.equal(j.cur.products[0].name, 'Dress');
   assert.equal(j.sync.oldest, '2026-10-10'); assert.equal(j.sync.backfillDone, true);
   assert.equal((await worker.fetch(new Request('https://x.test/api/summary?from=x&to=y', auth), env)).status, 400);

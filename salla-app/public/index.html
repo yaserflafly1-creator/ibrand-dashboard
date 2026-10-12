@@ -172,6 +172,8 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 .dlg .close{margin-top:16px;width:100%;justify-content:center;background:var(--pink-50);color:var(--pink-700)}
 @media (max-width:960px){.grid-3{grid-template-columns:1fr}}
 
+@media (max-width:640px){.mini-kpis{grid-template-columns:1fr 1fr!important}}
+
 /* Responsive */
 @media (max-width:1180px){.grid-kpi{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:960px){.grid-charts,.grid-bottom{grid-template-columns:1fr}}
@@ -380,6 +382,27 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <p class="period-note" id="shpNote" style="margin:12px 0 0"></p>
   </section>
 
+  <section class="card panel sec" id="cnlPanel">
+    <div class="panel-h">
+      <div><h2>الطلبات الملغية والمسترجعة</h2><p id="cnlSub"></p></div>
+      <div class="seg" id="cnlKind" role="group" aria-label="النوع">
+        <button data-k="canceled" class="on">ملغية</button><button data-k="refunded">مسترجعة</button>
+      </div>
+    </div>
+    <div class="mini-kpis" style="grid-template-columns:repeat(4,1fr)">
+      <div class="mini"><b id="cnlCount">0</b><span>عدد الطلبات</span></div>
+      <div class="mini"><b id="cnlValue">0</b><span>قيمتها</span></div>
+      <div class="mini"><b id="cnlRate">0%</b><span>نسبتها من كل الطلبات</span></div>
+      <div class="mini"><b id="cnlAvg">0</b><span>متوسط قيمة الطلب</span></div>
+    </div>
+    <div class="chart-box" style="height:200px;margin-bottom:18px"><canvas id="cnlChart" dir="ltr"></canvas></div>
+    <div class="grid-3" style="margin-bottom:0">
+      <div><h2 style="font-size:.95rem;margin-bottom:10px">أكثر المنتجات <span id="cnlWord">إلغاءً</span></h2><ul class="bars" id="cnlProducts"></ul></div>
+      <div><h2 style="font-size:.95rem;margin-bottom:10px">حسب طريقة الدفع</h2><ul class="bars" id="cnlPay"></ul></div>
+      <div><h2 style="font-size:.95rem;margin-bottom:10px">حسب المدينة</h2><ul class="bars" id="cnlCity"></ul></div>
+    </div>
+  </section>
+
   <section class="card panel sec" id="cpnPanel">
     <div class="panel-h"><div><h2>الكوبونات</h2><p id="cpnCount">جارٍ التحميل…</p></div></div>
     <div class="mini-kpis" style="grid-template-columns:repeat(3,1fr)">
@@ -509,14 +532,24 @@ function aggregate(from, to){
   }));
   const bucket = keyFn => { const m = {}; valid.forEach(o => { const k = keyFn(o) || 'unknown'; const x = m[k] || (m[k] = {k, orders:0, total:0}); x.orders++; x.total += o.total; }); return Object.values(m).sort((x,y)=>y.total-x.total); };
   const hours = new Array(24).fill(0), dow = new Array(7).fill(0), days = {};
-  list.forEach(o => { const k = ymd(new Date(o.ts)), e = days[k] || (days[k] = [k,0,0]); e[1]++; if(VALID(o)) e[2] += o.total; });
+  list.forEach(o => { const k = ymd(new Date(o.ts)), e = days[k] || (days[k] = [k,0,0,0,0,0,0]); e[1]++; if(VALID(o)) e[2] += o.total;
+    if(o.status==='canceled'){ e[3]++; e[4] += o.total; } else if(o.status==='refunded'){ e[5]++; e[6] += o.total; } });
+  const bucketOf = (arr, keyFn) => { const m = {}; arr.forEach(o => { const k = keyFn(o) || 'unknown'; const x = m[k] || (m[k] = {k, orders:0, total:0}); x.orders++; x.total += o.total; }); return Object.values(m).sort((x,y)=>y.total-x.total); };
+  const lostDetail = {};
+  ['canceled','refunded'].forEach(kind => {
+    const L = list.filter(o => o.status===kind), pm = {};
+    L.forEach(o => o.lines.forEach(([pi,q]) => { const p = PRODUCTS[pi], m = pm[p.n] || (pm[p.n] = {name:p.n, qty:0, total:0, img:p.img||'', icon:p.i}); m.qty += q; m.total += q*p.p; }));
+    const value = L.reduce((s,o)=>s+o.total,0), prods = Object.values(pm).sort((x,y)=>y.qty-x.qty);
+    lostDetail[kind] = {count:L.length, value, rate: list.length ? L.length/list.length*100 : 0, avg: L.length ? value/L.length : 0,
+      productsCount:prods.length, products:prods.slice(0,20), pay:bucketOf(L,o=>o.pay), city:bucketOf(L,o=>o.city)};
+  });
   valid.forEach(o => { const d = new Date(o.ts); hours[d.getHours()]++; dow[d.getDay()]++; });
   const revSum = Object.values(prodMap).reduce((x,m)=>x+m.total,0) || 1;
   const products = Object.values(prodMap).sort((x,y)=>y.qty-x.qty).map(m => ({...m, share:m.total/revSum*100}));
   return {
     list, revenue,
     pay: bucket(o => o.pay), city: bucket(o => o.city), src: bucket(o => o.src),
-    hours, dow, products, productsCount: products.length, top: products.slice(0,5),
+    hours, dow, products, productsCount: products.length, top: products.slice(0,5), lostDetail,
     series: Object.values(days).sort((x,y) => x[0]<y[0]?-1:1),
     orders: list.length,
     aov: valid.length ? revenue/valid.length : 0,
@@ -721,6 +754,35 @@ function renderTop(cur){
 }
 
 /* ============ Main update ============ */
+/* ============ الطلبات الملغية والمسترجعة ============ */
+let cnlKind = 'canceled', cnlChart;
+function renderCancel(cur, from, to){
+  const L = cur.lostDetail && cur.lostDetail[cnlKind]; if(!L) return;
+  const isC = cnlKind==='canceled';
+  $('#cnlWord').textContent = isC ? 'إلغاءً' : 'استرجاعاً';
+  $('#cnlCount').textContent = fmt(L.count); $('#cnlValue').textContent = money(L.value)+' '+CURRENCY;
+  $('#cnlRate').textContent = L.rate.toFixed(1)+'%'; $('#cnlAvg').textContent = money(L.avg)+' '+CURRENCY;
+  $('#cnlSub').textContent = L.count ? `${fmt(L.count)} طلباً ${isC?'ملغياً':'مسترجعاً'} بقيمة ${money(L.value)} ${CURRENCY}` : `لا توجد طلبات ${isC?'ملغية':'مسترجعة'} في هذه الفترة`;
+  const max = L.products.length ? L.products[0].qty : 1;
+  $('#cnlProducts').innerHTML = L.products.length ? L.products.slice(0,8).map(p => `
+    <li><div class="row"><b>${esc(p.name)}</b><span>${fmt(p.qty)} قطعة · ${money(p.total)} ${CURRENCY}</span></div>
+    <div class="bar"><i style="width:${p.qty/max*100}%"></i></div></li>`).join('') : '<li class="empty">لا توجد بيانات</li>';
+  renderBars('#cnlPay', L.pay, PAY_AR); renderBars('#cnlCity', L.city);
+  // الرسم: عدد الملغية/المسترجعة حسب التجميع المختار (يومي/شهري/سنوي)
+  const ci = isC ? 3 : 5, vi = isC ? 4 : 6, sr = buildSeries(from, to, state.gran), vals = new Array(sr.labels.length).fill(0);
+  (cur.series||[]).forEach(r => { const i = sr.idx[sr.keyOf(r[0])]; if(i===undefined) return; sr.cnt[i] += r[ci]||0; vals[i] += r[vi]||0; });
+  const data = {labels:sr.labels, datasets:[{label:isC?'الملغية':'المسترجعة', data:sr.cnt, backgroundColor:'#9f1239', borderRadius:5, maxBarThickness:22}]};
+  const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
+    tooltip:{rtl:true, textDirection:'rtl', backgroundColor:'#2a1a24', cornerRadius:12, displayColors:false,
+      callbacks:{label:c=>`العدد: ${fmt(c.parsed.y)}`, afterLabel:c=>`القيمة: ${money(vals[c.dataIndex])} ${CURRENCY}`}}},
+    scales:{x:{grid:{display:false}, border:{display:false}, ticks:{maxTicksLimit:8, maxRotation:0, color:'#8b7480', font:{size:11}}},
+      y:{beginAtZero:true, border:{display:false}, grid:{color:'#f6e9ef'}, ticks:{precision:0, maxTicksLimit:4, color:'#8b7480'}}}};
+  if(cnlChart){ cnlChart.data = data; cnlChart.options = opts; cnlChart.update(); }
+  else cnlChart = new Chart($('#cnlChart'), {type:'bar', data, options:opts});
+  document.querySelectorAll('#cnlKind button').forEach(b => b.classList.toggle('on', b.dataset.k===cnlKind));
+}
+document.querySelectorAll('#cnlKind button').forEach(b => b.addEventListener('click', () => { cnlKind = b.dataset.k; if(state.view) renderCancel(state.view.cur, state.view.from, state.view.to); }));
+
 /* ============ Live data (Salla Worker) ============ */
 // داخل سلة: الصفحة تُفتح بـ ?token=... ويجلب الـ Worker الطلبات الحقيقية. بدون ذلك (أو ?demo) تُستخدم بيانات تجريبية.
 const QS = new URLSearchParams(location.search);
@@ -801,6 +863,7 @@ async function update(){
   state.view = {from, to, cur};
   loadCustomerStats(from, to, cur);
   renderTime(cur);
+  renderCancel(cur, from, to);
   stamp();
   signalReady(); // تُرفع شاشة التحميل في لوحة سلة بعد أول عرض ناجح
 }
