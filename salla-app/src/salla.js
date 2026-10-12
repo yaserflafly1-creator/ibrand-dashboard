@@ -35,7 +35,7 @@ export function normalizeOrder(o) {
     id: o.reference_id ?? o.id,
     sallaId: o.id,
     customerId: o.customer?.id ?? null,
-    city: o.customer?.city || '',
+    city: o.customer?.city || o.shipping?.address?.city || o.shipping?.address?.region || o.ship_to?.city || o.shipping?.pickup_address?.city || '',
     paymentMethod: o.payment_method || '',
     source: o.source || '',
     customer: o.customer?.full_name || [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || 'عميل',
