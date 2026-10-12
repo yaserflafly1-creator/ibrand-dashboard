@@ -259,7 +259,10 @@ export default {
       if (pathname === '/api/shipments' && req.method === 'GET') return await handleShipments(req, env);
       if (pathname === '/api/customers' && req.method === 'GET') return await handleCustomers(req, env);
     } catch (e) {
-      return json({ error: 'server_error', message: String(e.message || e) }, 502);
+      const msg = String(e.message || e);
+      // صلاحية ناقصة في التطبيق: رد واضح بدل 502 (الواجهة تعرض «فعّل الصلاحية»)
+      if (/^salla (401|403)\b/.test(msg)) return json({ error: 'forbidden', message: msg }, 403);
+      return json({ error: 'server_error', message: msg }, 502);
     }
     return env.ASSETS.fetch(req);
   },

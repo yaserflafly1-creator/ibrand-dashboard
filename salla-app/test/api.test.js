@@ -109,3 +109,11 @@ test('cron: syncAll runs every installed merchant', async () => {
   assert.equal(out.length, 1);
   assert.ok(out[0][1].log.includes('inventory'), JSON.stringify(out));
 });
+
+test('missing Salla scope returns 403 (not 502)', async () => {
+  const env = mkEnv();
+  mockFetch(good, { '/shipments': () => new Response('{}', { status: 403 }) });
+  assert.equal((await get(env, '/api/shipments')).status, 403);
+  mockFetch(good, { '/shipments': () => new Response('{}', { status: 500 }) }); __clearMemo();
+  assert.equal((await get(env, '/api/shipments')).status, 502);
+});

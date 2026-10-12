@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<!-- نسخة المتصفح من الـ SDK 0.2.6 تقرأ process.env.NODE_ENV دون تعريفه فتتعطل رسائل سلة (process is not defined)؛ نعرّفه قبل تحميلها -->
+<script>window.process = window.process || {env:{NODE_ENV:'production'}};</script>
 <script src="https://unpkg.com/@salla.sa/embedded-sdk@0.2.6/dist/umd/index.js"></script>
 <style>
 :root{
