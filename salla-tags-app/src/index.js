@@ -73,7 +73,7 @@ app.post('/admin/backfill/:merchantId', async (req, res) => {
     const r = await salla.listProducts(merchantId, page).catch((e) => (console.error(e.message), null));
     if (!r || !r.data?.length) break;
     for (const p of r.data) await processProduct(merchantId, p.id);
-    if (page >= (r.pagination?.totalPages || 1)) break;
+    if (r.pagination?.totalPages && page >= r.pagination.totalPages) break;
   }
   console.log('انتهت المعالجة الشاملة');
 });
