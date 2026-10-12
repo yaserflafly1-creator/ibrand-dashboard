@@ -26,7 +26,9 @@ async function refreshToken(merchantId) {
   return t.access_token;
 }
 
-async function call(merchantId, method, path, body, retried = false) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function call(merchantId, method, path, body, retried = false, attempt = 0) {
   const m = store.getMerchant(merchantId);
   if (!m) throw new Error(`المتجر ${merchantId} غير مسجّل`);
   const res = await fetch(API + path, {
@@ -40,7 +42,12 @@ async function call(merchantId, method, path, body, retried = false) {
   });
   if (res.status === 401 && !retried) {
     await refreshToken(merchantId);
-    return call(merchantId, method, path, body, true);
+    return call(merchantId, method, path, body, true, attempt);
+  }
+  if (res.status === 429 && attempt < 6) {
+    const wait = Number(res.headers.get('retry-after')) || 5 * (attempt + 1);
+    await sleep(wait * 1000);
+    return call(merchantId, method, path, body, retried, attempt + 1);
   }
   if (!res.ok) throw new Error(`Salla ${method} ${path} -> ${res.status} ${await res.text()}`);
   return res.json();
@@ -73,17 +80,23 @@ async function createTag(merchantId, name) {
   return d.id;
 }
 
+const pendingCreates = new Map(); // يمنع إنشاء نفس الوسم مرتين عند المعالجة المتوازية
+
 async function ensureTagIds(merchantId, names) {
   const map = tagCache.get(merchantId) || (await loadTags(merchantId));
   const ids = [];
   for (const name of names) {
     const k = keyOf(name);
     if (!map.has(k)) {
+      const pk = `${merchantId}:${k}`;
+      if (!pendingCreates.has(pk)) pendingCreates.set(pk, createTag(merchantId, name));
       try {
-        map.set(k, await createTag(merchantId, name));
+        map.set(k, await pendingCreates.get(pk));
       } catch (err) {
         console.error(`تعذّر إنشاء الوسم "${name}":`, err.message);
         continue;
+      } finally {
+        pendingCreates.delete(pk);
       }
     }
     ids.push(map.get(k));

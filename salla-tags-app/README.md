@@ -19,7 +19,7 @@
 
 ## معالجة المنتجات الحالية
 ```
-curl -X POST https://<APP_URL>/admin/backfill/<MERCHANT_ID> -H "Authorization: Bearer <SALLA_WEBHOOK_SECRET>"
+curl -X POST "https://<APP_URL>/admin/backfill/<MERCHANT_ID>?limit=20&concurrency=3" -H "Authorization: Bearer <SALLA_WEBHOOK_SECRET>"
 ```
 
 ## ملاحظات

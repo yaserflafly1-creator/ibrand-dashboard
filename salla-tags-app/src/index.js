@@ -63,19 +63,44 @@ app.post('/webhooks/salla', (req, res) => {
   }
 });
 
-// معالجة كل المنتجات الحالية لمتجر (للتشغيل اليدوي): POST /admin/backfill/:merchantId
+// معالجة المنتجات الحالية: POST /admin/backfill/:merchantId?limit=20&concurrency=3
+// limit: أقصى عدد منتجات (للتجربة)، concurrency: عدد المنتجات بالتوازي (افتراضي 3، أقصى 8)
 // محمية بالسر نفسه: Authorization: Bearer <SALLA_WEBHOOK_SECRET>
-app.post('/admin/backfill/:merchantId', async (req, res) => {
+let backfillRunning = false;
+
+app.post('/admin/backfill/:merchantId', (req, res) => {
   if (req.get('authorization') !== `Bearer ${process.env.SALLA_WEBHOOK_SECRET}`) return res.sendStatus(401);
-  res.json({ started: true });
+  if (backfillRunning) return res.status(409).json({ error: 'المعالجة الشاملة شغالة حالياً' });
   const { merchantId } = req.params;
-  for (let page = 1; ; page++) {
-    const r = await salla.listProducts(merchantId, page).catch((e) => (console.error(e.message), null));
-    if (!r || !r.data?.length) break;
-    for (const p of r.data) await processProduct(merchantId, p.id);
-    if (r.pagination?.totalPages && page >= r.pagination.totalPages) break;
-  }
-  console.log('انتهت المعالجة الشاملة');
+  const limit = Number(req.query.limit) || Infinity;
+  const concurrency = Math.min(Number(req.query.concurrency) || 3, 8);
+  res.json({ started: true, limit, concurrency });
+
+  backfillRunning = true;
+  (async () => {
+    let done = 0;
+    let queue = [];
+    const flush = async () => {
+      const batch = queue.splice(0);
+      await Promise.all(batch.map((id) => processProduct(merchantId, id)));
+      done += batch.length;
+      console.log(`تقدّم: ${done} منتج`);
+    };
+    outer: for (let page = 1; ; page++) {
+      const r = await salla.listProducts(merchantId, page);
+      if (!r.data?.length) break;
+      for (const p of r.data) {
+        queue.push(p.id);
+        if (queue.length >= concurrency) await flush();
+        if (done + queue.length >= limit) break outer;
+      }
+      if (r.pagination?.totalPages && page >= r.pagination.totalPages) break;
+    }
+    await flush();
+    console.log(`انتهت المعالجة الشاملة: ${done} منتج`);
+  })()
+    .catch((e) => console.error('توقفت المعالجة الشاملة:', e.message))
+    .finally(() => { backfillRunning = false; });
 });
 
 app.get('/', (_req, res) => res.send('Salla Smart Tags is running'));
