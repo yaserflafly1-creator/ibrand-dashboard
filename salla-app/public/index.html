@@ -1016,10 +1016,10 @@ async function loadShipments(){
     if(LIVE){
       const j = await api('/api/shipments'); rows = j.shipments.map(x => ({...x, group:x.group||shipGroup(x.status)})); truncated = !!j.truncated;
     } else rows = demoShipments(ORDERS.filter(o => o.ts >= TODAY.getTime()-6*DAY));
-  } catch(e){ if(e.status===401) return; if(e.status===403){ if(seq===shpSeq) $('#shpPanel').hidden = true; return; } err = true; }
+  } catch(e){ if(e.status===401) return; if(seq===shpSeq) $('#shpPanel').hidden = true; return; }
   if(seq!==shpSeq) return;
   $('#shpPanel').hidden = false;
-  if(err){ $('#shpCount').textContent = 'تعذّر تحميل الشحنات'; $('#shpAttn').innerHTML = '<tr><td colspan="4" class="empty">تأكد من تفعيل صلاحية shipping.read للتطبيق</td></tr>'; return; }
+
   const g = x => rows.filter(r => r.group===x).length;
   $('#shpCount').textContent = `${fmt(rows.length)} شحنة خلال آخر 7 أيام`;
   $('#shpDel').textContent = fmt(g('delivered')); $('#shpTr').textContent = fmt(g('transit')); $('#shpRet').textContent = fmt(g('returned')); $('#shpBad').textContent = fmt(g('failed'));
