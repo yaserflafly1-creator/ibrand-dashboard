@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapStatus, parseSallaDate, normalizeOrder, buildPriceMap, applyCatalog } from '../src/salla.js';
+import { mapStatus, parseSallaDate, normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon } from '../src/salla.js';
 
 test('mapStatus', () => {
   assert.equal(mapStatus('completed'), 'completed');
@@ -39,4 +39,16 @@ test('applyCatalog prices lines by product name (sale price wins)', () => {
   assert.equal(orders[0].lines[0].price, 45);
   assert.equal(orders[0].lines[0].img, 't.png');
   assert.equal(orders[0].lines[1].price, 100 / 3);
+});
+test('normalizeInventoryItem follows Product Quantities shape', () => {
+  const i = normalizeInventoryItem({ id: 1730800454, name: 'SSD', image: 'a.jpg', sku_id: 442024243, sku: 'sam-ssd-128g', quantity: 127, sold_quantity: 340, price: '150.00', unlimited_quantity: false, variant: '128G - black' });
+  assert.deepEqual([i.qty, i.sold, i.price, i.unlimited, i.variant, i.skuId], [127, 340, 150, false, '128G - black', 442024243]);
+  assert.equal(normalizeInventoryItem({ id: 2, name: 'x', sku: null, variant: null, image: null }).sku, '');
+});
+test('normalizeCoupon: types, statistics may be missing', () => {
+  const a = normalizeCoupon({ id: 1, code: 'DEAL', type: 'p', status: 'active', amount: { amount: 20, currency: 'SAR' }, usage_limit: 90, expiry_date: '2030-01-01 00:00:00',
+    statistics: { num_of_usage: 5, num_of_customers: 4, coupon_sales: { amount: 300 } }, free_shipping: true });
+  assert.deepEqual([a.type, a.value, a.uses, a.customers, a.sales, a.usageLimit, a.freeShipping], ['percentage', 20, 5, 4, 300, 90, true]);
+  const b = normalizeCoupon({ id: 2, code: 'X', type: 'Fixed', amount: { amount: 30 } });
+  assert.deepEqual([b.type, b.uses, b.sales], ['fixed', null, null]);
 });

@@ -21,7 +21,7 @@
    - **Webhook URL:** `https://<worker>.workers.dev/webhook` (حدث `app.store.authorize`، وربما `app.uninstalled`)
    - **رابط التطبيق المضمَّن:** `https://<worker>.workers.dev/`
    - ضع رقم تطبيقك في `SALLA_APP_ID` (`wrangler.toml`)؛ يُرفض أي توكن صادر لتطبيق آخر.
-   - **الصلاحيات:** `orders.read` و`products.read` (قراءة فقط).
+   - **الصلاحيات:** `orders.read` و`products.read` و`customers.read` و`marketing.read` (قراءة فقط).
 5. للتجربة محلياً: `npm run dev` وافتح `/?demo` لبيانات تجريبية.
 
 ## ⚠️ نقاط تحتاج مطابقة مع وثائق سلة (موسومة `[VERIFY]` في الكود)

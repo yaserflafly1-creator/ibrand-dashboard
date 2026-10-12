@@ -75,3 +75,41 @@ export function applyCatalog(orders, map) {
   }
   return { matched, total };
 }
+
+// Product Quantities (GET /products/quantities): صف لكل منتج أو لكل متغيّر (variant)
+export function normalizeInventoryItem(p) {
+  return {
+    id: p.id,
+    skuId: p.sku_id ?? null,
+    name: p.name || 'منتج',
+    variant: p.variant || '',
+    sku: p.sku || '',
+    img: p.image || '',
+    qty: Number(p.quantity) || 0,
+    sold: Number(p.sold_quantity) || 0,
+    price: Number(p.price) || 0,
+    unlimited: !!p.unlimited_quantity
+  };
+}
+
+// List Coupons (GET /coupons، صلاحية marketing.read). statistics قد تغيب عن بعض الكوبونات فنرجع null بدل 0
+export function normalizeCoupon(c) {
+  const t = String(c.type || '').toLowerCase();
+  const st = c.statistics;
+  return {
+    id: c.id,
+    code: c.code || '',
+    type: t === 'p' || t === 'percentage' ? 'percentage' : 'fixed',
+    value: Number(c.amount?.amount) || 0,
+    currency: c.amount?.currency || 'SAR',
+    status: c.status || 'active',
+    start: c.start_date || '',
+    expiry: c.expiry_date || '',
+    usageLimit: Number(c.usage_limit) || 0,
+    uses: st ? Number(st.num_of_usage) || 0 : null,
+    customers: st ? Number(st.num_of_customers) || 0 : null,
+    sales: st ? Number(st.coupon_sales?.amount) || 0 : null,
+    freeShipping: !!c.free_shipping,
+    groupName: c.is_group ? c.group_name || '' : ''
+  };
+}

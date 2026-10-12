@@ -1,4 +1,4 @@
-import { normalizeOrder, buildPriceMap, applyCatalog } from './salla.js';
+import { normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon } from './salla.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -121,11 +121,78 @@ async function loadCatalog(env, merchant, get) {
   return products;
 }
 
-async function handleOrders(req, env) {
+// تحقق الهوية + تجهيز عميل سلة؛ يرجع { res } عند الفشل أو { merchant, get } عند النجاح
+async function authContext(req, env) {
   const merchant = await merchantFromEmbeddedToken(req, env);
-  if (!merchant) return json({ error: 'unauthorized' }, 401);
+  if (!merchant) return { res: json({ error: 'unauthorized' }, 401) };
   const tokens = await loadTokens(env, merchant);
-  if (!tokens) return json({ error: 'app not installed' }, 403);
+  if (!tokens) return { res: json({ error: 'app not installed' }, 403) };
+  return { merchant, get: makeClient(env, merchant, tokens) };
+}
+
+const cachedJson = (body) => new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+
+/* ---------- /api/inventory ---------- */
+async function handleInventory(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const key = `inventory:${ctx.merchant}`;
+  const hit = await env.TOKENS.get(key);
+  if (hit) return cachedJson(hit);
+  const items = [];
+  // الوثيقة لا تذكر per_page لهذه النقطة، فنمرّ على كل الصفحات بالتسلسل
+  for (let page = 1; page <= 100; page++) {
+    const j = await ctx.get('/products/quantities', { page });
+    (j.data || []).forEach((p) => items.push(normalizeInventoryItem(p)));
+    if (page >= (j.pagination?.totalPages ?? 1)) break;
+  }
+  const body = JSON.stringify({ items });
+  await env.TOKENS.put(key, body, { expirationTtl: 120 });
+  return cachedJson(body);
+}
+
+/* ---------- /api/coupons ---------- */
+async function handleCoupons(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const key = `coupons:${ctx.merchant}`;
+  const hit = await env.TOKENS.get(key);
+  if (hit) return cachedJson(hit);
+  const coupons = [];
+  for (let page = 1; page <= 50; page++) {
+    const j = await ctx.get('/coupons', { page });
+    (j.data || []).forEach((c) => { if (c.status !== 'deleted') coupons.push(normalizeCoupon(c)); });
+    if (page >= (j.pagination?.totalPages ?? 1)) break;
+  }
+  const body = JSON.stringify({ coupons });
+  await env.TOKENS.put(key, body, { expirationTtl: 120 });
+  return cachedJson(body);
+}
+
+/* ---------- /api/customers: إجمالي المسجلين + المسجلون في فترة (صلاحية customers.read) ---------- */
+async function handleCustomers(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const q = new URL(req.url).searchParams;
+  const from = q.get('from'), to = q.get('to');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
+  const key = `customers:${ctx.merchant}:${from}:${to}`;
+  const hit = await env.TOKENS.get(key);
+  if (hit) return cachedJson(hit);
+  // [VERIFY] قسم pagination في هذه النقطة موصوف cursor-based في الوثيقة؛ نقرأ total إن وُجد وإلا null
+  const [all, ranged] = await Promise.all([
+    ctx.get('/customers', { page: 1 }),
+    ctx.get('/customers', { page: 1, date_from: from, date_to: to })
+  ]);
+  const body = JSON.stringify({ total: all.pagination?.total ?? null, inRange: ranged.pagination?.total ?? null });
+  await env.TOKENS.put(key, body, { expirationTtl: 120 });
+  return cachedJson(body);
+}
+
+async function handleOrders(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const { merchant, get } = ctx;
 
   const q = new URL(req.url).searchParams;
   const from = q.get('from'), to = q.get('to');
@@ -135,7 +202,6 @@ async function handleOrders(req, env) {
   const cached = await env.TOKENS.get(cacheKey);
   if (cached) return new Response(cached, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 
-  const get = makeClient(env, merchant, tokens);
   const orders = [];
   let truncated = false;
   // الصفحات تُجلب بالتسلسل ولا تُتخطى (قيد من سلة)، والتصفية بالتاريخ تقلل العدد
@@ -163,6 +229,9 @@ export default {
     try {
       if (pathname === '/webhook' && req.method === 'POST') return await handleWebhook(req, env);
       if (pathname === '/api/orders' && req.method === 'GET') return await handleOrders(req, env);
+      if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
+      if (pathname === '/api/coupons' && req.method === 'GET') return await handleCoupons(req, env);
+      if (pathname === '/api/customers' && req.method === 'GET') return await handleCustomers(req, env);
     } catch (e) {
       return json({ error: 'server_error', message: String(e.message || e) }, 502);
     }

@@ -17,6 +17,12 @@ function mockFetch(introspectData) {
     if (u.startsWith('https://api.test/orders')) return ok([{ id: 1, reference_id: 500, total: { amount: 100, currency: 'SAR' }, date: { date: '2026-10-01 10:00:00.000000' },
       status: { slug: 'completed' }, items: [{ name: 'Dress', quantity: 2, thumbnail: null }], customer: { full_name: 'سارة' } },
       { id: 2, reference_id: 501, total: { amount: 50 }, date: { date: '2026-10-01 11:00:00.000000' }, status: { slug: 'payment_pending' }, items: [] }], { totalPages: 1 });
+    if (u.startsWith('https://api.test/coupons')) return ok([{ id: 1, code: 'A', type: 'fixed', status: 'active', amount: { amount: 10 } }, { id: 2, code: 'B', status: 'deleted', amount: { amount: 5 } }], { totalPages: 1 });
+    if (u.startsWith('https://api.test/customers')) return ok([], u.includes('date_from') ? { total: 7 } : { total: 120 });
+    if (u.startsWith('https://api.test/products/quantities')) {
+      const pg = Number(new URL(u).searchParams.get('page'));
+      return ok([{ id: pg, name: 'P' + pg, quantity: 3, sold_quantity: 9, price: '10.00', unlimited_quantity: false, variant: null, sku: null, image: null }], { totalPages: 2 });
+    }
     if (u.startsWith('https://api.test/products')) return ok([{ name: 'Dress', price: { amount: 60 }, sale_price: { amount: 45 }, thumbnail: 't.png' }], { totalPages: 1 });
     throw new Error('unexpected fetch ' + u);
   };
@@ -46,4 +52,25 @@ test('orders: rejects token of another app, expired token, and invalid token', a
 test('orders: 403 when app not installed for that store', async () => {
   mockFetch({ ...good, merchant_id: 999 });
   assert.equal((await worker.fetch(req(), env())).status, 403);
+});
+
+test('inventory: pages through Product Quantities and normalizes', async () => {
+  mockFetch(good);
+  const res = await worker.fetch(new Request('https://x.test/api/inventory', { headers: { authorization: 'Bearer tok' } }), env());
+  assert.equal(res.status, 200);
+  const j = await res.json();
+  assert.deepEqual(j.items.map((i) => [i.name, i.qty, i.sold, i.price]), [['P1', 3, 9, 10], ['P2', 3, 9, 10]]);
+  mockFetch(null);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/inventory', { headers: { authorization: 'Bearer bad' } }), env())).status, 401);
+});
+
+test('coupons: skips deleted; customers: total + in-range', async () => {
+  mockFetch(good);
+  const h = { headers: { authorization: 'Bearer tok' } };
+  const c = await (await worker.fetch(new Request('https://x.test/api/coupons', h), env())).json();
+  assert.deepEqual(c.coupons.map((x) => x.code), ['A']);
+  const cu = await (await worker.fetch(new Request('https://x.test/api/customers?from=2026-10-01&to=2026-10-31', h), env())).json();
+  assert.deepEqual(cu, { total: 120, inRange: 7 });
+  const bad = await worker.fetch(new Request('https://x.test/api/customers?from=x&to=y', h), env());
+  assert.equal(bad.status, 400);
 });

@@ -311,6 +311,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
     <div class="card panel">
       <div class="panel-h"><div><h2>العملاء</h2><p>جدد وعائدون وأفضل المشترين</p></div></div>
+      <p class="period-note" id="custTotals" style="margin:0 0 12px"></p>
       <div class="mini-kpis">
         <div class="mini"><b id="custNew">0</b><span>عميل جديد</span></div>
         <div class="mini"><b id="custRet">0</b><span>عميل عائد</span></div>
@@ -334,6 +335,49 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
       </table>
     </div>
     <button class="linkbtn more" id="prodMore" type="button" hidden>عرض الكل</button>
+  </section>
+
+  <section class="card panel sec" id="invPanel">
+    <div class="panel-h">
+      <div><h2>المخزون</h2><p id="invCount">جارٍ التحميل…</p></div>
+      <div class="seg" id="invFilter" role="group" aria-label="تصفية المخزون">
+        <button data-f="all" class="on">الكل</button><button data-f="low">منخفض</button><button data-f="out">نفد</button>
+      </div>
+    </div>
+    <div class="mini-kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="mini"><b id="invOut">0</b><span>نفد من المخزون</span></div>
+      <div class="mini"><b id="invLowN">0</b><span>مخزون منخفض</span></div>
+      <div class="mini"><b id="invValue">0</b><span>قيمة المخزون (بسعر البيع)</span></div>
+    </div>
+    <div class="panel-h" style="margin-bottom:10px">
+      <div class="field search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="invSearch" type="search" placeholder="ابحث بالاسم أو SKU" aria-label="بحث في المخزون">
+      </div>
+      <div class="field"><label for="invLow">منخفض عند ≤</label><input id="invLow" type="number" min="0" value="5" style="width:56px"></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>المنتج</th><th>SKU</th><th>المتوفر</th><th>المباع (إجمالي)</th><th>السعر</th></tr></thead>
+        <tbody id="invRows"></tbody>
+      </table>
+    </div>
+    <button class="linkbtn more" id="invMore" type="button" hidden>عرض الكل</button>
+  </section>
+
+  <section class="card panel sec" id="cpnPanel">
+    <div class="panel-h"><div><h2>الكوبونات</h2><p id="cpnCount">جارٍ التحميل…</p></div></div>
+    <div class="mini-kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="mini"><b id="cpnActive">0</b><span>كوبون نشط</span></div>
+      <div class="mini"><b id="cpnUses">0</b><span>مرات الاستخدام</span></div>
+      <div class="mini"><b id="cpnSales">0</b><span>مبيعات عبر الكوبونات</span></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>الكود</th><th>الخصم</th><th>الحالة</th><th>الاستخدام</th><th>المبيعات</th><th>ينتهي</th></tr></thead>
+        <tbody id="cpnRows"></tbody>
+      </table>
+    </div>
   </section>
 
   <dialog id="orderDlg"><div class="dlg" id="orderDlgBody"></div></dialog>
@@ -746,16 +790,113 @@ async function update(){
   renderBars('#payBars', cur.pay); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src);
   renderCustomers(cur); prodRows = cur.products; renderProducts();
   state.view = {from, to, cur};
+  loadCustomerStats(from, to, cur);
   renderTime(cur);
   stamp();
   signalReady(); // تُرفع شاشة التحميل في لوحة سلة بعد أول عرض ناجح
+}
+
+/* ============ Inventory (GET /products/quantities عبر الـ Worker) ============ */
+let INV = [], invFilter = 'all', invAll = false, invError = false;
+function demoInventory(){
+  const stock = [0,3,12,47,5,120,2,60], sold = {};
+  ORDERS.forEach(o => { if(VALID(o)) o.lines.forEach(([pi,q]) => sold[pi] = (sold[pi]||0)+q); });
+  return DEMO_PRODUCTS.map((p,i) => ({id:i, name:p.n, variant:'', sku:'SKU-'+(100+i), qty:stock[i], sold:sold[i]||0, price:p.p, unlimited:false}));
+}
+async function loadInventory(){
+  invError = false;
+  try{
+    if(LIVE){
+      const res = await fetch('/api/inventory', {headers:{authorization:'Bearer '+QS.get('token')}});
+      if(res.status===401) return sessionExpired();
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      INV = (await res.json()).items;
+    } else if(!INV.length) INV = demoInventory();
+  } catch(e){ invError = true; }
+  renderInventory();
+}
+const invState = it => it.unlimited ? 'ok' : it.qty<=0 ? 'out' : it.qty<=(Number($('#invLow').value)||0) ? 'low' : 'ok';
+function renderInventory(){
+  if(invError){ $('#invCount').textContent = 'تعذّر تحميل المخزون'; $('#invRows').innerHTML = '<tr><td colspan="5" class="empty">تأكد من تفعيل صلاحية products.read للتطبيق</td></tr>'; return; }
+  const out = INV.filter(i => invState(i)==='out').length, low = INV.filter(i => invState(i)==='low').length;
+  $('#invOut').textContent = fmt(out); $('#invLowN').textContent = fmt(low);
+  $('#invValue').textContent = money(INV.reduce((s,i) => s + (i.unlimited ? 0 : i.qty*i.price), 0)) + ' ' + CURRENCY;
+  $('#invCount').textContent = `${fmt(INV.length)} صنف`;
+  const q = $('#invSearch').value.trim().toLowerCase(), rank = {out:0, low:1, ok:2};
+  let rows = INV.filter(i => (invFilter==='all' || invState(i)===invFilter) && ((i.name+' '+i.variant+' '+i.sku).toLowerCase().includes(q)))
+    .sort((a,b) => rank[invState(a)]-rank[invState(b)] || a.qty-b.qty);
+  const shown = invAll ? rows : rows.slice(0,10);
+  $('#invRows').innerHTML = shown.length ? shown.map(i => { const st = invState(i);
+    const badge = i.unlimited ? '<span class="badge b-completed">غير محدود</span>' : `<span class="badge ${st==='out'?'b-canceled':st==='low'?'b-shipping':'b-completed'}">${fmt(i.qty)}${st==='out'?' · نفد':st==='low'?' · منخفض':''}</span>`;
+    return `<tr><td><b>${esc(i.name)}</b>${i.variant?`<br><small style="color:var(--muted)">${esc(i.variant)}</small>`:''}</td><td>${esc(i.sku||'—')}</td><td>${badge}</td><td>${fmt(i.sold)}</td><td>${money(i.price)} ${CURRENCY}</td></tr>`; }).join('')
+    : '<tr><td colspan="5" class="empty">لا توجد أصناف مطابقة</td></tr>';
+  $('#invMore').hidden = rows.length<=10; $('#invMore').textContent = invAll ? 'عرض أقل' : `عرض الكل (${fmt(rows.length)})`;
+}
+$('#invSearch').addEventListener('input', renderInventory);
+$('#invLow').addEventListener('input', renderInventory);
+$('#invMore').addEventListener('click', () => { invAll = !invAll; renderInventory(); });
+document.querySelectorAll('#invFilter button').forEach(b => b.addEventListener('click', () => {
+  invFilter = b.dataset.f; document.querySelectorAll('#invFilter button').forEach(x => x.classList.toggle('on', x===b)); renderInventory();
+}));
+
+/* ============ Coupons (GET /coupons) و Customers (GET /customers) ============ */
+let CPN = [], cpnError = false;
+function demoCoupons(){
+  const mk = (code,type,value,status,limit,uses,sales,expiry) => ({id:code, code, type, value, currency:'SAR', status, usageLimit:limit, uses, customers:Math.round(uses*.85), sales, expiry, freeShipping:false, groupName:''});
+  const y = new Date().getFullYear();
+  return [mk('RAMADAN20','percentage',20,'active',500,212,18450,`${y}-12-31`), mk('WELCOME50','fixed',50,'active',0,96,7200,''), mk('VIP15','percentage',15,'active',100,41,6120,`${y}-11-30`),
+    mk('EID10','percentage',10,'inactive',300,300,9310,`${y-1}-06-30`), mk('FREESHIP','fixed',0,'active',0,57,4100,'')];
+}
+async function loadCoupons(){
+  cpnError = false;
+  try{
+    if(LIVE){
+      const res = await fetch('/api/coupons', {headers:{authorization:'Bearer '+QS.get('token')}});
+      if(res.status===401) return sessionExpired();
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      CPN = (await res.json()).coupons;
+    } else if(!CPN.length) CPN = demoCoupons();
+  } catch(e){ cpnError = true; }
+  renderCoupons();
+}
+function renderCoupons(){
+  if(cpnError){ $('#cpnCount').textContent = 'تعذّر تحميل الكوبونات'; $('#cpnRows').innerHTML = '<tr><td colspan="6" class="empty">تأكد من تفعيل صلاحية marketing.read للتطبيق</td></tr>'; return; }
+  const now = Date.now(), expired = c => c.expiry && Date.parse(c.expiry.replace(' ','T')) < now;
+  const active = CPN.filter(c => c.status==='active' && !expired(c));
+  $('#cpnActive').textContent = fmt(active.length);
+  $('#cpnUses').textContent = fmt(CPN.reduce((s,c) => s+(c.uses||0), 0));
+  $('#cpnSales').textContent = money(CPN.reduce((s,c) => s+(c.sales||0), 0)) + ' ' + CURRENCY;
+  $('#cpnCount').textContent = `${fmt(CPN.length)} كوبون`;
+  const rows = CPN.slice().sort((a,b) => (b.sales||0)-(a.sales||0));
+  $('#cpnRows').innerHTML = rows.length ? rows.map(c => {
+    const off = expired(c) || c.status!=='active';
+    const disc = c.type==='percentage' ? c.value+'%' : money(c.value)+' '+CURRENCY;
+    const use = c.uses===null ? '—' : fmt(c.uses) + (c.usageLimit ? ' / '+fmt(c.usageLimit) : '');
+    return `<tr><td class="oid">${esc(c.code)}${c.groupName?`<br><small style="color:var(--muted)">${esc(c.groupName)}</small>`:''}</td><td>${disc}${c.freeShipping?' + شحن مجاني':''}</td>
+      <td><span class="badge ${off?'b-canceled':'b-completed'}">${expired(c)?'منتهي':c.status==='active'?'نشط':'غير نشط'}</span></td>
+      <td>${use}</td><td>${c.sales===null?'—':money(c.sales)+' '+CURRENCY}</td><td>${c.expiry?esc(c.expiry.slice(0,10)):'بدون'}</td></tr>`; }).join('')
+    : '<tr><td colspan="6" class="empty">لا توجد كوبونات</td></tr>';
+}
+let custSeq = 0;
+async function loadCustomerStats(from, to, cur){
+  const seq = ++custSeq, el = $('#custTotals');
+  let total = null, inRange = null;
+  try{
+    if(LIVE){
+      const res = await fetch(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`, {headers:{authorization:'Bearer '+QS.get('token')}});
+      if(res.ok){ const j = await res.json(); total = j.total; inRange = j.inRange; }
+      else if(res.status===401) return;
+    } else { total = new Set(ORDERS.map(o => o.cid)).size; inRange = cur.custNew; }
+  } catch(e){}
+  if(seq!==custSeq) return;
+  el.textContent = total===null && inRange===null ? '' : `إجمالي العملاء المسجلين: ${total===null?'—':fmt(total)} · سجّلوا في هذه الفترة: ${inRange===null?'—':fmt(inRange)}`;
 }
 
 /* ============ Auto refresh ============ */
 function stamp(){
   $('#lastUpdated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA-u-nu-latn', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) + (LIVE ? '' : ' (بيانات تجريبية)');
 }
-async function refreshNow(){ liveRange = null; await update(); }
+async function refreshNow(){ liveRange = null; await Promise.all([update(), loadInventory(), loadCoupons()]); }
 let autoTimer = null;
 function scheduleAuto(){
   clearInterval(autoTimer);
@@ -842,6 +983,8 @@ async function boot(){
     catch(e){ console.error('SDK init failed', e); }
   }
   setPreset('month');
+  loadInventory();
+  loadCoupons();
   scheduleAuto();
 }
 </script>
