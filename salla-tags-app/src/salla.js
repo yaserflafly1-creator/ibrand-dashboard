@@ -47,8 +47,60 @@ async function call(merchantId, method, path, body, retried = false) {
 }
 
 const getProduct = (merchantId, id) => call(merchantId, 'GET', `/products/${id}`).then((r) => r.data);
-const setTags = (merchantId, id, tags) => call(merchantId, 'PUT', `/products/${id}`, { tags });
-
 const listProducts = (merchantId, page) => call(merchantId, 'GET', `/products?page=${page}&per_page=50`);
 
-module.exports = { getProduct, setTags, listProducts };
+// وسوم سلة كيانات (id + name): نجلب الموجود وننشئ الناقص ثم نرسل المعرّفات.
+// كاش بالذاكرة لكل متجر: اسم الوسم (lowercase) -> id
+const tagCache = new Map();
+const keyOf = (name) => name.trim().toLowerCase();
+
+async function loadTags(merchantId) {
+  const map = new Map();
+  for (let page = 1; page <= 100; page++) {
+    const r = await call(merchantId, 'GET', `/products/tags?page=${page}`);
+    const before = map.size;
+    for (const t of r.data || []) map.set(keyOf(t.name), t.id);
+    if (!r.data?.length || map.size === before) break; // انتهت الصفحات أو تكررت
+  }
+  tagCache.set(merchantId, map);
+  return map;
+}
+
+async function createTag(merchantId, name) {
+  const qs = new URLSearchParams({ tag_name: name });
+  const r = await call(merchantId, 'POST', `/products/tags?${qs}`);
+  const d = Array.isArray(r.data) ? r.data[0] : r.data; // التوثيق يعرض الاستجابة ككائن أو مصفوفة
+  return d.id;
+}
+
+async function ensureTagIds(merchantId, names) {
+  const map = tagCache.get(merchantId) || (await loadTags(merchantId));
+  const ids = [];
+  for (const name of names) {
+    const k = keyOf(name);
+    if (!map.has(k)) {
+      try {
+        map.set(k, await createTag(merchantId, name));
+      } catch (err) {
+        console.error(`تعذّر إنشاء الوسم "${name}":`, err.message);
+        continue;
+      }
+    }
+    ids.push(map.get(k));
+  }
+  return ids;
+}
+
+async function setTags(merchantId, id, names) {
+  const ids = await ensureTagIds(merchantId, names);
+  try {
+    return await call(merchantId, 'PUT', `/products/${id}`, { tags: ids });
+  } catch (err) {
+    // صفحة Update Product لم نتحقق منها: لو رفضت المعرّفات نجرّب الأسماء
+    if (!/-> 4\d\d/.test(err.message)) throw err;
+    console.warn('رفضت سلة معرّفات الوسوم، نجرّب الأسماء:', err.message);
+    return call(merchantId, 'PUT', `/products/${id}`, { tags: names });
+  }
+}
+
+module.exports = { getProduct, setTags, listProducts, ensureTagIds };

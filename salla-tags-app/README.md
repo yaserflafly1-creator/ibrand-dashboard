@@ -4,7 +4,7 @@
 
 ## كيف يشتغل
 1. التاجر يثبّت التطبيق ← سلة ترسل `app.store.authorize` (Easy Mode) فنحفظ التوكنات.
-2. عند `product.created` / `product.updated` نجلب المنتج، نولّد الوسوم عبر Claude، ونحدّثها بـ `PUT /products/{id}`.
+2. عند `product.created` / `product.updated` نجلب المنتج ونولّد الوسوم عبر Claude. الوسوم في سلة كيانات (id + name)، فنجلب وسوم المتجر `GET /products/tags` وننشئ الناقص `POST /products/tags?tag_name=...` ثم نرسل المعرّفات في `PUT /products/{id}`.
 3. نحفظ بصمة (اسم+وصف+تصنيف) للمنتج لتجنب حلقة لا نهائية، لأن تحديثنا للوسوم نفسه يطلق `product.updated`.
 
 ## الإعداد
@@ -24,5 +24,7 @@ curl -X POST https://<APP_URL>/admin/backfill/<MERCHANT_ID> -H "Authorization: B
 
 ## ملاحظات
 - الوسوم الجديدة **تستبدل** وسوم المنتج الحالية (12 بالضبط).
+- صلاحية التطبيق لازم تكون Products **Read & Write** (إنشاء الوسوم يحتاج `products.read_write`).
+- صفحة Update Product لم أطّلع عليها: إن رفضت سلة المعرّفات يرجع الكود تلقائياً لإرسال الأسماء.
 - لم أختبر الربط الفعلي مع سلة لأنه يحتاج بيانات تطبيقك؛ تأكد من اسم حقل `tags` في استجابة `GET /products/{id}` عند أول تجربة.
 - الاختبارات: `npm test`.
