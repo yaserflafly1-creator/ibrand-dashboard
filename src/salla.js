@@ -1,17 +1,20 @@
 // محوّل بيانات سلة -> الشكل الذي تفهمه اللوحة.
 // الحقول مطابقة لوثيقة List Orders (GET /orders). ما زال موسوماً [VERIFY] ما لم تؤكده الوثائق بعد.
 
+// الـ slugs من وثيقة List Order Statuses. الحالات المخصصة من التاجر تحمل slug الحالة الأصلية.
 const COMPLETED = ['completed', 'delivered'];
-const CANCELED = ['canceled', 'cancelled'];
-const REFUNDED = ['restored', 'restoring', 'refunded'];
+const CANCELED = ['canceled', 'cancelled', 'payment_failed'];
+const REFUNDED = ['restored', 'restoring'];
+const UNPAID = ['payment_pending']; // لم يُدفع بعد: ليس طلباً فعلياً فيُستبعد من اللوحة
+// الباقي (in_progress, under_review, shipped, delivering, waiting_for_payment_confirmation) = قيد التنفيذ
 
-// [VERIFY] قائمة slugs الحالات الكاملة (صفحة List Order Statuses). المعروف من الأمثلة: in_progress, under_review
 export function mapStatus(slug = '') {
   const s = String(slug).toLowerCase();
   if (COMPLETED.includes(s)) return 'completed';
   if (CANCELED.includes(s)) return 'canceled';
   if (REFUNDED.includes(s)) return 'refunded';
-  return 'shipping'; // أي حالة أخرى = قيد التنفيذ
+  if (UNPAID.includes(s)) return 'unpaid';
+  return 'shipping';
 }
 
 // order.date = { date: "2026-08-02 18:08:47.000000", timezone: "Asia/Riyadh" }

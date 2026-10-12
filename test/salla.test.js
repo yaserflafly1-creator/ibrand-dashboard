@@ -8,6 +8,10 @@ test('mapStatus', () => {
   assert.equal(mapStatus('restored'), 'refunded');
   assert.equal(mapStatus('in_progress'), 'shipping');
   assert.equal(mapStatus('under_review'), 'shipping');
+  assert.equal(mapStatus('shipped'), 'shipping');
+  assert.equal(mapStatus('delivered'), 'completed');
+  assert.equal(mapStatus('payment_failed'), 'canceled');
+  assert.equal(mapStatus('payment_pending'), 'unpaid');
 });
 test('parseSallaDate uses Riyadh time', () => {
   assert.equal(parseSallaDate({ date: '2026-10-01 03:00:00.000000' }), Date.parse('2026-10-01T00:00:00Z'));

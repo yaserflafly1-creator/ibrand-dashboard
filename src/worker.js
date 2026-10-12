@@ -132,7 +132,7 @@ async function handleOrders(req, env) {
   for (let page = 1; ; page++) {
     if (page > MAX_PAGES) { truncated = true; break; }
     const j = await get('/orders', { from_date: from, to_date: to, per_page: PER_PAGE, page });
-    (j.data || []).forEach((o) => { const n = normalizeOrder(o); if (!n.draft) orders.push(n); });
+    (j.data || []).forEach((o) => { const n = normalizeOrder(o); if (!n.draft && n.status !== 'unpaid') orders.push(n); });
     if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
 
