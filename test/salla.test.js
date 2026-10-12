@@ -1,20 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapStatus, parseSallaDate, normalizeOrder, normalizeItems } from '../src/salla.js';
+import { mapStatus, parseSallaDate, normalizeOrder } from '../src/salla.js';
 
 test('mapStatus', () => {
   assert.equal(mapStatus('completed'), 'completed');
   assert.equal(mapStatus('canceled'), 'canceled');
   assert.equal(mapStatus('restored'), 'refunded');
+  assert.equal(mapStatus('in_progress'), 'shipping');
   assert.equal(mapStatus('under_review'), 'shipping');
 });
 test('parseSallaDate uses Riyadh time', () => {
   assert.equal(parseSallaDate({ date: '2026-10-01 03:00:00.000000' }), Date.parse('2026-10-01T00:00:00Z'));
 });
-test('normalizeOrder / items', () => {
-  const o = normalizeOrder({ id: 1, reference_id: 5001, date: { date: '2026-10-01 10:00:00.000000' }, status: { slug: 'completed' },
-    amounts: { total: { amount: 250 } }, customer: { first_name: 'سارة', last_name: 'علي' } });
-  assert.deepEqual([o.id, o.customer, o.status, o.total], [5001, 'سارة علي', 'completed', 250]);
-  const l = normalizeItems({ items: [{ name: 'عطر', quantity: 2, amounts: { total: { amount: 200 } } }] });
-  assert.deepEqual([l[0].qty, l[0].price], [2, 100]);
+test('normalizeOrder follows List Orders shape', () => {
+  const o = normalizeOrder({
+    id: 1333249299, reference_id: 275839672, draft: false,
+    total: { amount: 16.39, currency: 'SAR' },
+    date: { date: '2026-08-02 18:08:47.000000', timezone: 'Asia/Riyadh' },
+    status: { slug: 'in_progress' },
+    items: [{ name: 'Perfumes Package', quantity: 1, thumbnail: 'x.png' }, { name: 'Dress', quantity: 1, thumbnail: null }],
+    customer: { full_name: 'Mohammed Ahmed' }
+  });
+  assert.deepEqual([o.id, o.customer, o.status, o.total, o.qty], [275839672, 'Mohammed Ahmed', 'shipping', 16.39, 2]);
+  assert.equal(o.lines.length, 2);
+  assert.equal(o.lines[0].price, 16.39 / 2);
+  assert.equal(o.lines[1].img, '');
 });

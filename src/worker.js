@@ -1,4 +1,4 @@
-import { normalizeOrder, normalizeItems } from './salla.js';
+import { normalizeOrder } from './salla.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -87,14 +87,9 @@ function makeClient(env, merchant, tokens) {
 }
 
 /* ---------- /api/orders ---------- */
-async function pool(items, size, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k]); }
-  }));
-  return out;
-}
+const PER_PAGE = 30;      // الحد الأقصى المسموح (وثيقة List Orders)
+const MAX_PAGES = 300;    // سقف أمان لعدد النداءات
+const CACHE_TTL = 300;    // ثوانٍ
 
 async function handleOrders(req, env) {
   const merchant = await merchantFromEmbeddedToken(req, env);
@@ -106,25 +101,24 @@ async function handleOrders(req, env) {
   const from = q.get('from'), to = q.get('to');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
 
+  const cacheKey = `orders:${merchant}:${from}:${to}`;
+  const cached = await env.TOKENS.get(cacheKey);
+  if (cached) return new Response(cached, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+
   const get = makeClient(env, merchant, tokens);
   const orders = [];
-  // [VERIFY] أسماء معاملات التصفية from_date / to_date / per_page / page وشكل pagination
-  for (let page = 1; page <= 60; page++) {
-    const j = await get('/orders', { from_date: from, to_date: to, per_page: 65, page });
-    (j.data || []).forEach((o) => orders.push(normalizeOrder(o)));
-    const p = j.pagination;
-    if (!p || page >= (p.totalPages ?? p.total_pages ?? 1)) break;
+  let truncated = false;
+  // الصفحات تُجلب بالتسلسل ولا تُتخطى (قيد من سلة)، والتصفية بالتاريخ تقلل العدد
+  for (let page = 1; ; page++) {
+    if (page > MAX_PAGES) { truncated = true; break; }
+    const j = await get('/orders', { from_date: from, to_date: to, per_page: PER_PAGE, page });
+    (j.data || []).forEach((o) => { const n = normalizeOrder(o); if (!n.draft) orders.push(n); });
+    if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
 
-  // تفاصيل المنتجات للطلبات الأحدث فقط (حد لحماية حدود الـ subrequests)
-  const cap = Math.min(Number(env.MAX_ORDER_DETAILS) || 200, 900);
-  const need = orders.filter((o) => o.status === 'completed' || o.status === 'shipping')
-    .sort((a, b) => b.ts - a.ts).slice(0, cap);
-  await pool(need, 8, async (o) => {
-    try { o.lines = normalizeItems((await get(`/orders/${o.sallaId}`)).data); } catch { /* نتجاهل فشل طلب واحد */ }
-  });
-
-  return json({ orders, currency: orders[0]?.currency || 'SAR', detailedOrders: need.length });
+  const body = JSON.stringify({ orders, currency: orders[0]?.currency || 'SAR', truncated });
+  if (!truncated) await env.TOKENS.put(cacheKey, body, { expirationTtl: CACHE_TTL });
+  return new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
 export default {

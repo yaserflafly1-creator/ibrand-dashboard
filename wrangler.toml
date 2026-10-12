@@ -17,7 +17,6 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 SALLA_API_BASE = "https://api.salla.dev/admin/v2"
 SALLA_TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
 SALLA_INTROSPECT_URL = "https://exchange-authority.salla.network/introspect"
-MAX_ORDER_DETAILS = "200"
 
 # الأسرار (لا تُكتب هنا): npx wrangler secret put SALLA_CLIENT_ID
 #   SALLA_CLIENT_ID, SALLA_CLIENT_SECRET, SALLA_WEBHOOK_SECRET
