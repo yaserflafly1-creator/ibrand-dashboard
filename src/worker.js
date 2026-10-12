@@ -44,20 +44,26 @@ async function handleWebhook(req, env) {
 const saveTokens = (env, merchant, t) => env.TOKENS.put(`merchant:${merchant}`, JSON.stringify(t));
 const loadTokens = async (env, merchant) => JSON.parse((await env.TOKENS.get(`merchant:${merchant}`)) || 'null');
 
-/* ---------- هوية التاجر من توكن التطبيق المضمَّن ---------- */
+/* ---------- هوية التاجر من توكن التطبيق المضمَّن (Token Introspect) ---------- */
 async function merchantFromEmbeddedToken(req, env) {
-  const token = new URL(req.url).searchParams.get('token') || (req.headers.get('authorization') || '').replace(/^Bearer /i, '');
-  if (!token) return null;
-  // [VERIFY] نقطة التحقق (introspect) وشكل الاستجابة في وثائق Embedded Apps
+  const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || new URL(req.url).searchParams.get('token');
+  if (!token || !env.SALLA_APP_ID) return null;
+  // وثيقة Authentication (التطبيقات المضمَّنة): POST + ترويسة S-Source = app id، والجسم { token } فقط
   const r = await fetch(env.SALLA_INTROSPECT_URL, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 's-source': String(env.SALLA_APP_ID) },
     body: JSON.stringify({ token })
   });
   if (!r.ok) return null;
-  const j = await r.json();
-  const id = j?.data?.merchant_id ?? j?.merchant_id ?? j?.data?.merchant;
-  return id ? String(id) : null;
+  const j = await r.json().catch(() => null);
+  const d = j?.data;
+  // الاستجابة: { merchant_id, user_id, exp } (وصفحة Endpoint تذكر store_id/app_id لنسخة Report Builder فنقبل الاسمين)
+  const id = d?.merchant_id ?? d?.store_id;
+  if (!j?.success || !id) return null;
+  if (d.app_id !== undefined && String(d.app_id) !== String(env.SALLA_APP_ID)) return null; // توكن تطبيق آخر
+  if (d.exp && Date.parse(d.exp) < Date.now()) return null;                                  // منتهي
+  // [VERIFY] نفترض أن merchant_id هو نفسه حقل merchant في الـ webhooks (نؤكده بتجربة فعلية)
+  return String(id);
 }
 
 /* ---------- نداءات Salla مع تجديد التوكن ---------- */

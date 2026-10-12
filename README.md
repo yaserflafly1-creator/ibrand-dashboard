@@ -20,6 +20,7 @@
 4. `npm run deploy` ثم في بوابة شركاء سلة:
    - **Webhook URL:** `https://<worker>.workers.dev/webhook` (حدث `app.store.authorize`، وربما `app.uninstalled`)
    - **رابط التطبيق المضمَّن:** `https://<worker>.workers.dev/`
+   - ضع رقم تطبيقك في `SALLA_APP_ID` (`wrangler.toml`)؛ يُرفض أي توكن صادر لتطبيق آخر.
    - **الصلاحيات:** `orders.read` و`products.read` (قراءة فقط).
 5. للتجربة محلياً: `npm run dev` وافتح `/?demo` لبيانات تجريبية.
 
@@ -29,7 +30,8 @@
 
 ## جلسة التطبيق المضمَّن
 - عند ردّ `401` من `/api/orders` تستدعي الصفحة `embedded.auth.refresh()` (من `@salla.sa/embedded-sdk`) لإعادة تحميل الإطار بتوكن جديد، مع حارس 30 ثانية ضد الحلقات.
-- ⚠️ تحميل الـ SDK نفسه (`window.sallaEmbedded`) وطريقة وصول التوكن للصفحة (نفترض `?token=`) ينتظران صفحات Embedded SDK: Installation / Initialization / Auth.
+- الـ SDK يُحمَّل من unpkg بنسخة مثبَّتة (`@salla.sa/embedded-sdk@0.2.6`، UMD، الاسم العام `SallaEmbeddedSDK`). التسلسل: `embedded.init()` ثم قراءة `?token=` (كما يفعل `auth.getToken()`) ثم التحقق في الخادم ثم `embedded.ready()` بعد أول عرض ناجح.
+- الخادم يرسل التوكن في ترويسة Authorization، ويتحقق عبر `POST https://api.salla.dev/exchange-authority/v1/introspect` بترويسة `S-Source` = رقم التطبيق.
 
 ## تصنيف حالات الطلب (من List Order Statuses)
 - **مكتمل:** `completed`, `delivered` · **ملغي:** `canceled`, `payment_failed` · **مسترجع:** `restored`, `restoring`
