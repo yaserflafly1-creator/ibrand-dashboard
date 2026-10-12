@@ -1,0 +1,23 @@
+name = "ibrand-sales-dashboard"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# هذه المسارات تمر على الـ Worker أولاً، والباقي يُخدَّم كملفات ثابتة
+run_worker_first = ["/api/*", "/webhook"]
+
+# أنشئ الـ KV: npx wrangler kv namespace create TOKENS ثم ضع الـ id هنا
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+SALLA_API_BASE = "https://api.salla.dev/admin/v2"
+SALLA_TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
+SALLA_INTROSPECT_URL = "https://exchange-authority.salla.network/introspect"
+MAX_ORDER_DETAILS = "200"
+
+# الأسرار (لا تُكتب هنا): npx wrangler secret put SALLA_CLIENT_ID
+#   SALLA_CLIENT_ID, SALLA_CLIENT_SECRET, SALLA_WEBHOOK_SECRET

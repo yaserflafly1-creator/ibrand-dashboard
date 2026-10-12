@@ -255,8 +255,8 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
 
 <script>
 /* ============ Mock data (deterministic) ============ */
-const CURRENCY = 'ر.س';
-const PRODUCTS = [
+let CURRENCY = 'ر.س';
+const DEMO_PRODUCTS = [
   {n:'عطر الورد الفاخر', i:'🌸', p:289},
   {n:'حقيبة يد جلدية', i:'👜', p:459},
   {n:'ساعة ذكية برو', i:'⌚', p:799},
@@ -266,6 +266,7 @@ const PRODUCTS = [
   {n:'نظارة شمسية', i:'🕶️', p:219},
   {n:'وشاح حرير', i:'🧣', p:159}
 ];
+const PRODUCTS = DEMO_PRODUCTS.slice();
 const WEIGHTS = [16,10,6,13,9,22,8,16];
 const NAMES = ['سارة العتيبي','محمد القحطاني','نورة الدوسري','عبدالله الشمري','ريم الحربي','فهد المطيري','لينا الزهراني','خالد السبيعي','هند الغامدي','يوسف العنزي','أمل الشهري','تركي البقمي','جود المالكي','سلطان العمري','دانة الراشد','ماجد الحازمي'];
 const DAY = 864e5;
@@ -274,7 +275,7 @@ function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x}
 function endOfDay(d){const x=new Date(d);x.setHours(23,59,59,999);return x}
 
 const TODAY = startOfDay(new Date());
-const ORDERS = (function(){
+let ORDERS = (function(){
   const r = rng(20240607), out = [], total = WEIGHTS.reduce((a,b)=>a+b,0);
   const pick = () => {let x = r()*total; for(let i=0;i<WEIGHTS.length;i++){x-=WEIGHTS[i]; if(x<0) return i} return 0};
   const SPAN = 1100;
@@ -490,7 +491,7 @@ function renderTop(cur){
     const p = PRODUCTS[t.pi];
     return `<li>
       <span class="rank">${i+1}</span>
-      <div class="pimg" aria-hidden="true">${p.i}</div>
+      <div class="pimg" aria-hidden="true">${p.img?`<img src="${esc(p.img)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:14px">`:p.i}</div>
       <div class="pinfo"><b>${p.n}</b><span>${fmt(t.qty)} مبيعة</span><div class="bar"><i style="width:${t.qty/max*100}%"></i></div></div>
       <div class="ptot">${money(t.total)}<small>${CURRENCY}</small></div>
     </li>`;
@@ -498,11 +499,42 @@ function renderTop(cur){
 }
 
 /* ============ Main update ============ */
-function update(){
+/* ============ Live data (Salla Worker) ============ */
+// داخل سلة: الصفحة تُفتح بـ ?token=... ويجلب الـ Worker الطلبات الحقيقية. بدون ذلك (أو ?demo) تُستخدم بيانات تجريبية.
+const QS = new URLSearchParams(location.search);
+const LIVE = location.protocol!=='file:' && !QS.has('demo') && !!QS.get('token');
+const CUR_SYMBOL = {SAR:'ر.س', USD:'$', AED:'د.إ', KWD:'د.ك', QAR:'ر.ق', BHD:'د.ب', OMR:'ر.ع', EGP:'ج.م'};
+let liveRange = null, liveSeq = 0;
+async function ensureLive(from, to){
+  if(!LIVE) return true;
+  const a = ymd(from), b = ymd(to);
+  if(liveRange && liveRange[0]<=a && liveRange[1]>=b) return true;
+  const res = await fetch(`/api/orders?from=${a}&to=${b}&token=${encodeURIComponent(QS.get('token'))}`);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const j = await res.json();
+  PRODUCTS.length = 0;
+  const idx = {};
+  ORDERS = j.orders.map(o => ({
+    id:o.id, customer:o.customer, ts:o.ts, status:o.status, total:o.total, qty:o.qty,
+    lines:o.lines.map(l => {
+      if(!(l.name in idx)){ idx[l.name] = PRODUCTS.length; PRODUCTS.push({n:l.name, i:'🛍️', p:l.price, img:l.img}); }
+      return [idx[l.name], l.qty];
+    })
+  }));
+  CURRENCY = CUR_SYMBOL[j.currency] || j.currency || CURRENCY;
+  liveRange = [a, b];
+  return true;
+}
+
+async function update(){
   let [from, to] = rangeFor(state.preset);
   if(!from || !to || isNaN(from) || isNaN(to)) return;
   if(from>to) [from,to] = [to,from];
   const [pFrom, pTo, days] = previousRange(from, to);
+  const seq = ++liveSeq;
+  try{ await ensureLive(pFrom, to); }
+  catch(e){ if(seq===liveSeq) toast('تعذّر جلب بيانات المتجر من سلة'); return; }
+  if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
   const cur = aggregate(from, to), prev = aggregate(pFrom, pTo);
   if(!state.granManual) state.gran = autoGran(days);
 
