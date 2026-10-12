@@ -28,6 +28,7 @@ async function processProduct(merchantId, productId) {
   inFlight.add(key);
   try {
     const product = await salla.getProduct(merchantId, productId);
+    if (product.status === 'deleted') return;
     const hash = contentHash(product);
     // نتجاهل تعديلاتنا نحن (الوسوم فقط تغيّرت) ونتجنب حلقة webhook لا نهائية
     if (store.getProductHash(merchantId, productId) === hash && (product.tags || []).length >= TAG_COUNT) return;

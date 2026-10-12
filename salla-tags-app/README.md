@@ -28,3 +28,12 @@ curl -X POST "https://<APP_URL>/admin/backfill/<MERCHANT_ID>?limit=20&concurrenc
 - حسب توثيق Update Product الحقل `tags` مصفوفة معرّفات أرقام، وهذا ما يرسله الكود.
 - لم أختبر الربط الفعلي مع سلة لأنه يحتاج بيانات تطبيقك؛ تأكد من اسم حقل `tags` في استجابة `GET /products/{id}` عند أول تجربة.
 - الاختبارات: `npm test`.
+
+## تشغيل من جهازك بدون استضافة
+```
+npm install
+cp .env.example .env   # عبّي SALLA_ACCESS_TOKEN و ANTHROPIC_API_KEY
+npm run tag -- --count=10            # معاينة فقط
+npm run tag -- --count=10 --apply    # كتابة فعلية
+npm run tag -- --ids=123,456 --apply # منتجات محددة
+```
