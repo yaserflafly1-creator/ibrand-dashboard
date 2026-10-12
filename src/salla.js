@@ -113,3 +113,31 @@ export function normalizeCoupon(c) {
     groupName: c.is_group ? c.group_name || '' : ''
   };
 }
+
+// List Shipments (GET /shipments، صلاحية shipping.read). الاستجابة لا تحمل تاريخاً، فالتصفية بالفترة تتم في الطلب نفسه.
+const SHIP_GROUPS = {
+  delivered: ['delivered', 'partially_delivered'],
+  transit: ['created', 'creating', 'in_progress', 'in_transit', 'received_at_final_hub', 'to_be_reattempted', 'reattempted', 'delivering', 'shipped', 'pending'],
+  returned: ['return_to_origin', 'return_in_progress', 'returned', 'returning'],
+  failed: ['unable_to_deliver', 'lost', 'damaged', 'cancelled', 'canceled']
+};
+export function shipmentGroup(status = '') {
+  const s = String(status).toLowerCase();
+  for (const [g, list] of Object.entries(SHIP_GROUPS)) if (list.includes(s)) return g;
+  return 'transit';
+}
+export function normalizeShipment(s) {
+  return {
+    id: s.id ?? s.shipping_number ?? '',
+    courier: s.courier_name || 'غير محدد',
+    status: s.status || '',
+    statusLabel: s.translated_status || '',
+    group: shipmentGroup(s.status),
+    cod: s.payment_method === 'cod',
+    city: s.ship_to?.city || '',
+    total: Number(s.total?.amount) || 0,
+    tracking: s.tracking_number || s.shipping_number || '',
+    link: s.tracking_link || s.tracking_url || '',
+    international: !!s.is_international
+  };
+}

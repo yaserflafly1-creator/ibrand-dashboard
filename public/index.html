@@ -365,6 +365,21 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <button class="linkbtn more" id="invMore" type="button" hidden>عرض الكل</button>
   </section>
 
+  <section class="card panel sec" id="shpPanel">
+    <div class="panel-h"><div><h2>الشحن</h2><p id="shpCount">جارٍ التحميل…</p></div></div>
+    <div class="mini-kpis" style="grid-template-columns:repeat(4,1fr)">
+      <div class="mini"><b id="shpDel">0</b><span>تم التسليم</span></div>
+      <div class="mini"><b id="shpTr">0</b><span>قيد الشحن</span></div>
+      <div class="mini"><b id="shpRet">0</b><span>مرتجع</span></div>
+      <div class="mini"><b id="shpBad">0</b><span>متعثّر / ملغي</span></div>
+    </div>
+    <div class="grid-charts" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div><h2 style="font-size:.95rem;margin-bottom:10px">شركات الشحن</h2><ul class="bars" id="shpCouriers"></ul></div>
+      <div><h2 style="font-size:.95rem;margin-bottom:10px">شحنات تحتاج متابعة</h2><div class="tbl-wrap"><table style="min-width:420px"><thead><tr><th>الشحنة</th><th>الشركة</th><th>المدينة</th><th>الحالة</th></tr></thead><tbody id="shpAttn"></tbody></table></div></div>
+    </div>
+    <p class="period-note" id="shpNote" style="margin:12px 0 0"></p>
+  </section>
+
   <section class="card panel sec" id="cpnPanel">
     <div class="panel-h"><div><h2>الكوبونات</h2><p id="cpnCount">جارٍ التحميل…</p></div></div>
     <div class="mini-kpis" style="grid-template-columns:repeat(3,1fr)">
@@ -791,6 +806,7 @@ async function update(){
   renderCustomers(cur); prodRows = cur.products; renderProducts();
   state.view = {from, to, cur};
   loadCustomerStats(from, to, cur);
+  loadShipments(from, to, cur);
   renderTime(cur);
   stamp();
   signalReady(); // تُرفع شاشة التحميل في لوحة سلة بعد أول عرض ناجح
@@ -890,6 +906,44 @@ async function loadCustomerStats(from, to, cur){
   } catch(e){}
   if(seq!==custSeq) return;
   el.textContent = total===null && inRange===null ? '' : `إجمالي العملاء المسجلين: ${total===null?'—':fmt(total)} · سجّلوا في هذه الفترة: ${inRange===null?'—':fmt(inRange)}`;
+}
+
+/* ============ Shipments (GET /shipments) ============ */
+const SHIP_AR = {created:'تم الإنشاء', in_progress:'قيد التجهيز', in_transit:'في الطريق', received_at_final_hub:'وصلت المركز الأخير', to_be_reattempted:'إعادة محاولة', reattempted:'أُعيدت المحاولة',
+  unable_to_deliver:'تعذّر التسليم', delivering:'جارٍ التوصيل', delivered:'تم التسليم', partially_delivered:'تسليم جزئي', shipped:'تم الشحن', cancelled:'ملغية', canceled:'ملغية', lost:'مفقودة', damaged:'تالفة',
+  return_to_origin:'مرتجعة للمرسل', return_in_progress:'جارٍ الإرجاع', returned:'مرتجعة', returning:'جارٍ الإرجاع', pending:'قيد الانتظار', creating:'جارٍ الإنشاء'};
+const SHIP_GROUP = {delivered:['delivered','partially_delivered'], returned:['return_to_origin','return_in_progress','returned','returning'], failed:['unable_to_deliver','lost','damaged','cancelled','canceled']};
+const shipGroup = st => Object.keys(SHIP_GROUP).find(g => SHIP_GROUP[g].includes(st)) || 'transit';
+let shpSeq = 0;
+function demoShipments(list){
+  const couriers = ['SMSA','أرامكس','J&T','سمسا إكسبرس','ناقل'], bad = ['unable_to_deliver','lost','damaged','cancelled'];
+  return list.filter(o => o.status!=='canceled').map(o => { const k = o.id%97;
+    const st = o.status==='refunded' ? 'return_to_origin' : o.status==='shipping' ? (k%4===0?'in_transit':'delivering') : (k%23===0 ? bad[k%4] : 'delivered');
+    return {id:'SH'+o.id, courier:couriers[k%5], status:st, group:shipGroup(st), cod:o.pay==='cod', city:o.city||'', tracking:'TRK'+o.id, link:'', total:o.total}; });
+}
+async function loadShipments(from, to, cur){
+  const seq = ++shpSeq; let rows = null, err = false, truncated = false;
+  try{
+    if(LIVE){
+      const res = await fetch(`/api/shipments?from=${ymd(from)}&to=${ymd(to)}`, {headers:{authorization:'Bearer '+QS.get('token')}});
+      if(res.status===401) return;
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const j = await res.json(); rows = j.shipments.map(x => ({...x, group:x.group||shipGroup(x.status)})); truncated = !!j.truncated;
+    } else rows = demoShipments(cur.list);
+  } catch(e){ err = true; }
+  if(seq!==shpSeq) return;
+  if(err){ $('#shpCount').textContent = 'تعذّر تحميل الشحنات'; $('#shpAttn').innerHTML = '<tr><td colspan="4" class="empty">تأكد من تفعيل صلاحية shipping.read للتطبيق</td></tr>'; return; }
+  const g = x => rows.filter(r => r.group===x).length;
+  $('#shpCount').textContent = `${fmt(rows.length)} شحنة في هذه الفترة`;
+  $('#shpDel').textContent = fmt(g('delivered')); $('#shpTr').textContent = fmt(g('transit')); $('#shpRet').textContent = fmt(g('returned')); $('#shpBad').textContent = fmt(g('failed'));
+  const by = {}; rows.forEach(r => { const c = by[r.courier] || (by[r.courier] = {k:r.courier, n:0, d:0, cod:0}); c.n++; if(r.group==='delivered') c.d++; if(r.cod) c.cod++; });
+  const list = Object.values(by).sort((a,b) => b.n-a.n).slice(0,6), max = list.length ? list[0].n : 1;
+  $('#shpCouriers').innerHTML = list.length ? list.map(c => `<li><div class="row"><b>${esc(c.k)}</b><span>${fmt(c.n)} شحنة · تسليم ${(c.d/c.n*100).toFixed(0)}%</span></div><div class="bar"><i style="width:${c.n/max*100}%"></i></div></li>`).join('') : '<li class="empty">لا توجد بيانات</li>';
+  const attn = rows.filter(r => r.group==='failed' || r.group==='returned').slice(0,8);
+  $('#shpAttn').innerHTML = attn.length ? attn.map(r => `<tr><td class="oid">${r.link?`<a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${esc(r.tracking||r.id)}</a>`:esc(r.tracking||r.id)}</td><td>${esc(r.courier)}</td><td>${esc(r.city||'—')}</td>
+    <td><span class="badge ${r.group==='failed'?'b-canceled':'b-refunded'}">${esc(SHIP_AR[r.status]||r.statusLabel||r.status)}</span></td></tr>`).join('') : '<tr><td colspan="4" class="empty">لا توجد شحنات متعثّرة 🎉</td></tr>';
+  const cod = rows.filter(r => r.cod).length;
+  $('#shpNote').textContent = rows.length ? `الدفع عند الاستلام: ${fmt(cod)} شحنة (${(cod/rows.length*100).toFixed(0)}%)` + (truncated ? ' · عُرض جزء من الشحنات فقط (الفترة طويلة)' : '') : '';
 }
 
 /* ============ Auto refresh ============ */

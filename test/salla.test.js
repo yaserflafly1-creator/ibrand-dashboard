@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapStatus, parseSallaDate, normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon } from '../src/salla.js';
+import { mapStatus, parseSallaDate, normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon, normalizeShipment, shipmentGroup } from '../src/salla.js';
 
 test('mapStatus', () => {
   assert.equal(mapStatus('completed'), 'completed');
@@ -51,4 +51,10 @@ test('normalizeCoupon: types, statistics may be missing', () => {
   assert.deepEqual([a.type, a.value, a.uses, a.customers, a.sales, a.usageLimit, a.freeShipping], ['percentage', 20, 5, 4, 300, 90, true]);
   const b = normalizeCoupon({ id: 2, code: 'X', type: 'Fixed', amount: { amount: 30 } });
   assert.deepEqual([b.type, b.uses, b.sales], ['fixed', null, null]);
+});
+test('shipments: status groups and normalization', () => {
+  assert.deepEqual(['delivered', 'partially_delivered', 'in_transit', 'lost', 'return_to_origin', 'unknown_x'].map(shipmentGroup),
+    ['delivered', 'delivered', 'transit', 'failed', 'returned', 'transit']);
+  const s = normalizeShipment({ id: 'a1', courier_name: 'SMSA', status: 'delivered', payment_method: 'cod', ship_to: { city: 'جدة' }, total: { amount: 150 }, tracking_number: 'T1' });
+  assert.deepEqual([s.courier, s.group, s.cod, s.city, s.total, s.tracking], ['SMSA', 'delivered', true, 'جدة', 150, 'T1']);
 });

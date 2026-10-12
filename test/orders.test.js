@@ -17,6 +17,7 @@ function mockFetch(introspectData) {
     if (u.startsWith('https://api.test/orders')) return ok([{ id: 1, reference_id: 500, total: { amount: 100, currency: 'SAR' }, date: { date: '2026-10-01 10:00:00.000000' },
       status: { slug: 'completed' }, items: [{ name: 'Dress', quantity: 2, thumbnail: null }], customer: { full_name: 'سارة' } },
       { id: 2, reference_id: 501, total: { amount: 50 }, date: { date: '2026-10-01 11:00:00.000000' }, status: { slug: 'payment_pending' }, items: [] }], { totalPages: 1 });
+    if (u.startsWith('https://api.test/shipments')) return ok([{ id: 's1', courier_name: 'SMSA', status: 'delivered', payment_method: 'pre_paid', ship_to: { city: 'جدة' } }, { id: 's2', courier_name: 'SMSA', status: 'lost' }], { totalPages: 1 });
     if (u.startsWith('https://api.test/coupons')) return ok([{ id: 1, code: 'A', type: 'fixed', status: 'active', amount: { amount: 10 } }, { id: 2, code: 'B', status: 'deleted', amount: { amount: 5 } }], { totalPages: 1 });
     if (u.startsWith('https://api.test/customers')) return ok([], u.includes('date_from') ? { total: 7 } : { total: 120 });
     if (u.startsWith('https://api.test/products/quantities')) {
@@ -73,4 +74,12 @@ test('coupons: skips deleted; customers: total + in-range', async () => {
   assert.deepEqual(cu, { total: 120, inRange: 7 });
   const bad = await worker.fetch(new Request('https://x.test/api/customers?from=x&to=y', h), env());
   assert.equal(bad.status, 400);
+});
+
+test('shipments: normalized with groups, range validated', async () => {
+  mockFetch(good);
+  const h = { headers: { authorization: 'Bearer tok' } };
+  const j = await (await worker.fetch(new Request('https://x.test/api/shipments?from=2026-10-01&to=2026-10-31', h), env())).json();
+  assert.deepEqual(j.shipments.map((s) => [s.courier, s.group]), [['SMSA', 'delivered'], ['SMSA', 'failed']]);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/shipments?from=1&to=2', h), env())).status, 400);
 });

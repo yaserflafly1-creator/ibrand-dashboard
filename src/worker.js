@@ -1,4 +1,4 @@
-import { normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon } from './salla.js';
+import { normalizeOrder, buildPriceMap, applyCatalog, normalizeInventoryItem, normalizeCoupon, normalizeShipment } from './salla.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -151,6 +151,30 @@ async function handleInventory(req, env) {
   return cachedJson(body);
 }
 
+/* ---------- /api/shipments ---------- */
+async function handleShipments(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  const q = new URL(req.url).searchParams;
+  const from = q.get('from'), to = q.get('to');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return json({ error: 'bad range' }, 400);
+  const key = `shipments:${ctx.merchant}:${from}:${to}`;
+  const hit = await env.TOKENS.get(key);
+  if (hit) return cachedJson(hit);
+  const shipments = [];
+  let truncated = false;
+  // [VERIFY] أقصى per_page لهذه النقطة غير مذكور؛ نستخدم 30 كما في الطلبات
+  for (let page = 1; ; page++) {
+    if (page > 100) { truncated = true; break; }
+    const j = await ctx.get('/shipments', { from_date: from, to_date: to, per_page: 30, page });
+    (j.data || []).forEach((s) => shipments.push(normalizeShipment(s)));
+    if (page >= (j.pagination?.totalPages ?? 1)) break;
+  }
+  const body = JSON.stringify({ shipments, truncated });
+  if (!truncated) await env.TOKENS.put(key, body, { expirationTtl: to >= todayRiyadh() ? CACHE_TTL_LIVE : CACHE_TTL_PAST });
+  return cachedJson(body);
+}
+
 /* ---------- /api/coupons ---------- */
 async function handleCoupons(req, env) {
   const ctx = await authContext(req, env);
@@ -231,6 +255,7 @@ export default {
       if (pathname === '/api/orders' && req.method === 'GET') return await handleOrders(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
       if (pathname === '/api/coupons' && req.method === 'GET') return await handleCoupons(req, env);
+      if (pathname === '/api/shipments' && req.method === 'GET') return await handleShipments(req, env);
       if (pathname === '/api/customers' && req.method === 'GET') return await handleCustomers(req, env);
     } catch (e) {
       return json({ error: 'server_error', message: String(e.message || e) }, 502);
