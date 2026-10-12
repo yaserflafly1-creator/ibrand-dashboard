@@ -26,6 +26,11 @@ const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).t
 export function fakeSalla({ perDay = 4, inclusive = true, firstDay = '2000-01-01', calls = [] } = {}) {
   return async (path, params = {}) => {
     calls.push([path, params]);
+    const one = /^\/orders\/(\d+)$/.exec(path);
+    if (one) {   // تفاصيل الطلب: الحملة تعتمد على رقم الطلب (زوجي: إنستغرام/C1، فردي: مباشر)
+      const id = Number(one[1]);
+      return { data: { id, campaign: id % 2 === 0 ? { source: 'Instagram', medium: 'paid', campaign: '1202' } : { source: '', medium: '', campaign: '' } } };
+    }
     if (path === '/orders') {
       const orders = [];
       let from = params.from_date, to = params.to_date;

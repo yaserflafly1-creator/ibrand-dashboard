@@ -33,6 +33,7 @@ export function normalizeOrder(o) {
   const total = Number(o.total?.amount) || 0;
   return {
     id: o.reference_id ?? o.id,
+    sallaId: o.id,
     customerId: o.customer?.id ?? null,
     city: o.customer?.city || '',
     paymentMethod: o.payment_method || '',
@@ -141,5 +142,16 @@ export function normalizeShipment(s) {
     tracking: s.tracking_number || s.shipping_number || '',
     link: s.tracking_link || s.tracking_url || '',
     international: !!s.is_international
+  };
+}
+
+// Order Details (GET /orders/{id}?format=light): يحمل campaign و source_details (UTM). قائمة الطلبات لا تحملها.
+export function normalizeAttribution(d) {
+  const c = d?.campaign || {}, s = d?.source_details || {};
+  const clean = (v) => String(v ?? '').trim();
+  return {
+    src: clean(c.source || s.utm_source).toLowerCase(),
+    med: clean(c.medium || s.utm_medium).toLowerCase(),
+    camp: clean(c.campaign || s.utm_campaign)
   };
 }

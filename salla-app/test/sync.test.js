@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeD1, makeKV, fakeSalla } from './helpers.js';
 import { syncMerchant, addDays, clearPriceCache } from '../src/sync.js';
-import { ensureSchema, rangeRows, coverage, getMeta, readInventory } from '../src/db.js';
+import { ensureSchema, rangeRows, coverage, getMeta, readInventory, campaignStats } from '../src/db.js';
 
 const NOW = Date.parse('2026-10-12T09:00:00Z');   // 12:00 الرياض
 const TODAY = '2026-10-12';
@@ -57,10 +57,10 @@ test('works whether from_date/to_date are inclusive or exclusive', async () => {
 
 test('over-budget range is not written, and chunk size adapts', async () => {
   clearPriceCache();
-  const env = setup({ BACKFILL_DAYS: '10', SYNC_BUDGET: '30' });
+  const env = setup({ BACKFILL_DAYS: '10', SYNC_BUDGET: '45' });
   const get = fakeSalla({ perDay: 200 });      // ~7 صفحات لليوم: الدفعة الأولى لا تتسع
   const r1 = await syncMerchant(env, 'm1', { get }, NOW);
-  assert.ok(r1.used <= 30);
+  assert.ok(r1.used <= 45);
   let st = await getMeta(env.DB, 'm1', 'state', {});
   assert.ok(st.ppd > 5, 'ppd should grow after a failed chunk');
   const rows = await rangeRows(env.DB, 'm1', addDays(TODAY, -10), addDays(TODAY, -2));
@@ -89,6 +89,24 @@ test('schema bump restarts the backfill once', async () => {
   await setMeta(env.DB, 'm1', 'state', { ...st, schema: 1 });          // محاكاة صفوف بالشكل القديم
   await syncMerchant(env, 'm1', { get }, NOW + 13 * 60000);
   st = await getMeta(env.DB, 'm1', 'state', {});
-  assert.equal(st.schema, 2);
+  assert.equal(st.schema, 3);
   assert.ok(st.backfillDone === false || st.backfillNext !== null || st.resyncNext, 'backfill restarted');
+});
+
+test('campaign attribution: order details fetched once per order, stats by source and campaign', async () => {
+  clearPriceCache();
+  const env = setup({ CAMPAIGN_DAYS: '3', BACKFILL_DAYS: '3', SYNC_BUDGET: '40' });
+  const calls = [];
+  const get = fakeSalla({ perDay: 4, calls });
+  for (let i = 0; i < 25; i++) await syncMerchant(env, 'm1', { get }, NOW + i * 60000);
+  const detailCalls = calls.filter(([p]) => /^\/orders\/\d+$/.test(p)).map(([p]) => p);
+  assert.equal(new Set(detailCalls).size, detailCalls.length, 'no order detail fetched twice');
+  const st = await campaignStats(env.DB, 'm1', addDays(TODAY, -3), TODAY);
+  assert.equal(st.attributed, st.total, 'all valid orders attributed');
+  assert.ok(st.total > 0);
+  const k = Object.fromEntries(st.sources.map((x) => [x.k, x]));
+  assert.ok(k.instagram && k['']);
+  assert.equal(st.campaigns[0].camp, '1202');
+  assert.equal(st.campaigns[0].src, 'instagram');
+  assert.equal(st.attributed, k.instagram.orders + k[''].orders);
 });

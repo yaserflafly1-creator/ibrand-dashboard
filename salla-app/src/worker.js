@@ -1,7 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
 import { sumDays, seriesOf } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory } from './db.js';
-import { syncMerchant, priceMap, priceLines, addDays, riyadhDay } from './sync.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats } from './db.js';
+import { syncMerchant, priceMap, priceLines, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
 const memoStore = new Map();
@@ -147,8 +147,10 @@ async function handleSummary(req, env) {
   const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
   const state = await getMeta(env.DB, ctx.merchant, 'state', {});
   const cov = await coverage(env.DB, ctx.merchant);
+  const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
+  campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
   return json({
-    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows),
+    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns,
     currency: state.currency || 'SAR',
     sync: { ...cov, backfillDone: !!state.backfillDone, inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0 }
   });

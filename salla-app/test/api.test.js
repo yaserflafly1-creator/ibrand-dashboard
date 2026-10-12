@@ -2,7 +2,7 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { __clearMemo, syncAll } from '../src/worker.js';
 import { makeD1, makeKV } from './helpers.js';
-import { ensureSchema, upsertDays, upsertInventory, setMeta } from '../src/db.js';
+import { ensureSchema, upsertDays, upsertInventory, setMeta, upsertOrderRows, setAttr } from '../src/db.js';
 import { emptyDay, addOrder, roundDay } from '../src/agg.js';
 import { normalizeOrder } from '../src/salla.js';
 import { clearPriceCache, riyadhDay } from '../src/sync.js';
@@ -118,4 +118,19 @@ test('missing Salla scope returns 403 (not 502)', async () => {
   assert.equal((await get(env, '/api/shipments')).status, 403);
   mockFetch(good, { '/shipments': () => new Response('{}', { status: 500 }) }); __clearMemo();
   assert.equal((await get(env, '/api/shipments')).status, 502);
+});
+
+test('summary includes campaign stats from stored order attribution', async () => {
+  const env = mkEnv(); mockFetch(good); await ensureSchema(env.DB);
+  const M = '346539387';
+  await upsertOrderRows(env.DB, M, [
+    { id: 1, day: '2026-10-12', status: 'completed', total: 100 }, { id: 2, day: '2026-10-12', status: 'completed', total: 50 },
+    { id: 3, day: '2026-10-12', status: 'canceled', total: 70 }, { id: 4, day: '2026-10-12', status: 'shipping', total: 30 }]);
+  await setAttr(env.DB, M, [{ id: 1, src: 'instagram', med: 'paid', camp: 'C1' }, { id: 2, src: '', med: '', camp: '' }, { id: 3, src: 'instagram', med: '', camp: 'C1' }]);
+  const j = await (await get(env, '/api/summary?from=2026-10-12&to=2026-10-12')).json();
+  const c = j.campaigns;
+  assert.deepEqual(c.sources.map((x) => [x.k, x.orders, x.total]), [['instagram', 1, 100], ['', 1, 50]]);   // الملغي مستبعد
+  assert.deepEqual(c.campaigns.map((x) => [x.src, x.camp, x.total]), [['instagram', 'C1', 100]]);
+  assert.deepEqual([c.attributed, c.total], [2, 3]);                                                            // طلب الشحن بلا إسناد بعد
+  assert.ok(c.since);
 });

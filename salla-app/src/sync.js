@@ -1,11 +1,12 @@
 // مزامنة الخلفية (Cron): تجلب الطلبات من سلة على دفعات صغيرة وتحفظ ملخصات يومية في D1.
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
-import { normalizeOrder, normalizeInventoryItem } from './salla.js';
+import { normalizeOrder, normalizeInventoryItem, normalizeAttribution } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
-const SCHEMA = 2;
+const SCHEMA = 3;
+export const CAMPAIGN_DAYS_DEFAULT = 90;
 export const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 export const riyadhDay = (ms) => new Date(ms + 3 * 3600e3).toISOString().slice(0, 10);
 const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / DAY) + 1;
@@ -39,6 +40,7 @@ async function syncOrdersRange(ctx, a, b) {
   const days = new Map();
   for (let d = a; d <= b; d = addDays(d, 1)) days.set(d, emptyDay(d));
   let pages = 0;
+  const attrRows = [];
   for (let page = 1; ; page++) {
     if (ctx.used >= ctx.budget) return { ok: false, pages };
     const j = await ctx.get('/orders', { from_date: from, to_date: to, per_page: 30, page });
@@ -49,11 +51,31 @@ async function syncOrdersRange(ctx, a, b) {
       priceLines(o, ctx.prices);
       if (o.currency) ctx.currency = o.currency;
       addOrder(days.get(o.day), o);
+      if (o.day >= ctx.attrFloor && o.sallaId != null) attrRows.push({ id: o.sallaId, day: o.day, status: o.status, total: o.total });
     }
     if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
   await upsertDays(ctx.db, ctx.merchant, [...days.values()].map(roundDay));
+  if (attrRows.length) await upsertOrderRows(ctx.db, ctx.merchant, attrRows);
   return { ok: true, pages };
+}
+
+/* بيانات الحملة: طلب تفاصيل لكل طلب جديد (مرة واحدة فقط لكل طلب) ضمن حدود الميزانية */
+async function attributionChunk(ctx, limit) {
+  if (limit <= 0) return 0;
+  const ids = await pendingAttr(ctx.db, ctx.merchant, ctx.attrFloor, limit);
+  let done = 0;
+  for (let i = 0; i < ids.length; i += 4) {
+    const res = await Promise.all(ids.slice(i, i + 4).map((id) =>
+      ctx.get('/orders/' + id, { format: 'light' }).then((j) => ({ id, ...normalizeAttribution(j.data) })).catch((e) => ({ id, err: String(e.message || e) }))));
+    const ok = res.filter((r) => !r.err);
+    // طلب محذوف (404) نعلّمه منتهياً حتى لا نكرره، وغير ذلك (429/5xx) نعيده لاحقاً
+    const gone = res.filter((r) => r.err && /salla 404\b/.test(r.err)).map((r) => ({ id: r.id, src: '', med: '', camp: '' }));
+    await setAttr(ctx.db, ctx.merchant, [...ok, ...gone]);
+    done += ok.length + gone.length;
+    if (res.some((r) => r.err && /salla 429\b/.test(r.err))) break;   // حد معدّل سلة: نتوقف حتى التشغيل التالي
+  }
+  return done;
 }
 
 /* دفعة أيام للخلف من المؤشر ptr حتى الحد lower. تضبط حجم الدفعة حسب متوسط الصفحات لكل يوم. */
@@ -100,6 +122,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   ctx.prices = await priceMap(db, merchant);
 
   const today = riyadhDay(now);
+  ctx.attrFloor = addDays(today, -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
   const floor = addDays(today, -(Number(env.BACKFILL_DAYS) || 400));
   state.ppd = state.ppd || 5;
   // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
@@ -116,6 +139,12 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {
       const r = await syncOrdersRange(ctx, addDays(today, -1), today);
       if (r.ok) { state.lastRecent = now; log.push('recent'); }
+    }
+
+    // 2b) بيانات الحملات للطلبات الجديدة (ثلث الميزانية المتبقية كحد أقصى كي لا تتأخر بقية المزامنة)
+    if (state.invDoneOnce && ctx.used < ctx.budget) {
+      const n = await attributionChunk(ctx, Math.floor((ctx.budget - ctx.used) / 3));
+      if (n) log.push('attribution');
     }
 
     // 3) إعادة مزامنة آخر 30 يوماً كل ساعة (لالتقاط تغيّر الحالات)، ثم 4) استكمال الأرشيف التاريخي

@@ -28,6 +28,8 @@ SALLA_API_BASE = "https://api.salla.dev/admin/v2"
 SALLA_TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
 SALLA_INTROSPECT_URL = "https://api.salla.dev/exchange-authority/v1/introspect"
 BACKFILL_DAYS = "400"
+# عدد الأيام الأخيرة التي نحلّل فيها حملات الطلبات (طلب تفاصيل لكل طلب)
+CAMPAIGN_DAYS = "90"
 # 40 مناسبة للخطة المجانية (حد 50 نداءً خارجياً لكل تشغيل)، وارفعها إلى 900 في الخطة المدفوعة
 SYNC_BUDGET = "40"
 SALLA_APP_ID = "REPLACE_WITH_YOUR_APP_ID"
