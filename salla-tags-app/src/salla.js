@@ -93,14 +93,10 @@ async function ensureTagIds(merchantId, names) {
 
 async function setTags(merchantId, id, names) {
   const ids = await ensureTagIds(merchantId, names);
-  try {
-    return await call(merchantId, 'PUT', `/products/${id}`, { tags: ids });
-  } catch (err) {
-    // صفحة Update Product لم نتحقق منها: لو رفضت المعرّفات نجرّب الأسماء
-    if (!/-> 4\d\d/.test(err.message)) throw err;
-    console.warn('رفضت سلة معرّفات الوسوم، نجرّب الأسماء:', err.message);
-    return call(merchantId, 'PUT', `/products/${id}`, { tags: names });
-  }
+  if (!ids.length) throw new Error('لم نحصل على أي معرّف وسم');
+  // PUT /products/{id}: الحقل tags مصفوفة أرقام (معرّفات وسوم) حسب التوثيق
+  await call(merchantId, 'PUT', `/products/${id}`, { tags: ids });
+  return ids;
 }
 
 module.exports = { getProduct, setTags, listProducts, ensureTagIds };
