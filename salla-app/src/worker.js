@@ -114,7 +114,12 @@ function makeClient(env, merchant, tokens) {
     const call = () => fetch(url, { headers: { authorization: `Bearer ${t.access_token}`, accept: 'application/json' } });
     let r = await call();
     if (r.status === 401 && t.refresh_token) { t = await refresh(env, merchant, t); r = await call(); }
-    if (!r.ok) throw new Error(`salla ${r.status} ${path}`);
+    if (!r.ok) {
+      // نلحق مختصراً من رسالة سلة (للتشخيص في شريط المزامنة؛ لا يحوي أسراراً)
+      const body = await r.text().catch(() => '');
+      const msg = (body.match(/"message"\s*:\s*"([^"]{1,140})"/) || [])[1] || '';
+      throw new Error(`salla ${r.status} ${path}${msg ? ' ' + msg : ''}`);
+    }
     return r.json();
   };
 }
