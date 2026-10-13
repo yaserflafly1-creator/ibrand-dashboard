@@ -945,7 +945,7 @@ async function update(){
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur, prev};
-  if(!SHARE) loadCustomerStats(from, to, cur);
+  loadCustomerStats(from, to, cur);   // أرقام مجمّعة بلا أسماء: مسموحة أيضاً في رابط المشاركة
   renderTime(cur);
   renderCancel(cur, from, to);
   state.view = {from, to, cur, prev};
@@ -1041,7 +1041,7 @@ async function loadCustomerStats(from, to, cur){
       custInfo = {backfillDone:true, error:''};
       total = Object.keys(first).length; inRange = act.size; fresh = [...act].filter(c => first[c]>=from.getTime()).length; ret = inRange - fresh;
     }
-  } catch(e){ if(e.status===401) return; }
+  } catch(e){ if(e.status===401 && !SHARE) return; }
   if(seq!==custSeq) return;
   $('#custTotal').textContent = total===null ? '—' : fmt(total);
   $('#custInRange').textContent = inRange===null ? '—' : fmt(inRange);
