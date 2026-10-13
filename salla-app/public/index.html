@@ -679,7 +679,7 @@ function deltaHTML(cur, prev, invert){
   const arrow = up ? '<path d="M12 19V5M5 12l7-7 7 7"/>' : '<path d="M12 5v14M19 12l-7 7-7-7"/>';
   return `<span class="delta ${good?'up':'down'}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${arrow}</svg>${Math.abs(pct).toFixed(1)}%</span>`;
 }
-// متوسط سعر القطعة = قيمة المنتجات المباعة (كمية × سعر الكتالوج، بدون الشحن والضريبة) ÷ إجمالي القطع المباعة
+// متوسط سعر القطعة = قيمة المنتجات المباعة (كمية × سعر الكتالوج + ضريبة المنتجات الخاضعة لها، بدون الشحن) ÷ إجمالي القطع المباعة
 const unitAvg = c => c.sold ? (c.productSales||0) / c.sold : 0;
 function renderKpis(cur, prev){
   const items = [
@@ -690,7 +690,7 @@ function renderKpis(cur, prev){
       sub:`قيمة مفقودة: ${money(cur.lostDetail ? cur.lostDetail.canceled.value : cur.lostValue)} ${CURRENCY}`},
     {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)},
     {k:'unit', lbl:'متوسط سعر القطعة', val:money(unitAvg(cur)), unit:CURRENCY, d:deltaHTML(unitAvg(cur), unitAvg(prev)),
-      sub:`${money(cur.productSales||0)} ${CURRENCY} ÷ ${fmt(cur.sold)} قطعة · بدون الشحن والضريبة`}
+      sub:`${money(cur.productSales||0)} ${CURRENCY} ÷ ${fmt(cur.sold)} قطعة · شامل الضريبة وبدون الشحن`}
   ];
   $('#kpis').innerHTML = items.map(i => `
     <article class="card kpi ${i.cls||''}">
@@ -864,7 +864,7 @@ function renderCategories(cur){
   }).join('');
   const avg = C.units ? C.total / C.units : 0;
   $('#catFoot').innerHTML = `<tr><td>الإجمالي</td><td>${money(C.total)} ${CURRENCY}</td><td>100%</td><td>${fmt(C.units)}</td><td class="c-avg">${money(avg)} ${CURRENCY}</td><td></td></tr>`;
-  $('#catSub').textContent = `${fmt(C.list.length)} تصنيف · مبيعات المنتجات بدون الشحن والضريبة`;
+  $('#catSub').textContent = `${fmt(C.list.length)} تصنيف · مبيعات المنتجات شامل الضريبة وبدون الشحن`;
   $('#catMore').hidden = C.list.length <= 12; $('#catMore').textContent = catAll ? 'عرض أقل' : `عرض الكل (${fmt(C.list.length)})`;
   const un = C.list.find(c => !c.name);
   $('#catNote').textContent = LIVE && !C.mapped ? 'تصنيفات المنتجات قيد التحميل من سلة…' : (un && un.share > 5 ? `${un.share.toFixed(1)}% من المبيعات لمنتجات بلا تصنيف في سلة` : '');
@@ -1355,7 +1355,7 @@ function exportReport(){
   const days = Math.round((v.to - v.from)/DAY) + 1;
   const lab = (map,k) => (map && map[k]) || (k==='unknown' ? 'غير محدد' : k);
   const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
-    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['مبيعات المنتجات بدون الشحن والضريبة ('+CURRENCY+')', c.productSales, p ? p.productSales : null, 3], ['متوسط سعر القطعة بدون الشحن والضريبة ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
+    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['مبيعات المنتجات شامل الضريبة وبدون الشحن ('+CURRENCY+')', c.productSales, p ? p.productSales : null, 3], ['متوسط سعر القطعة شامل الضريبة وبدون الشحن ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
   const sheets = [];
   sheets.push({name:'الملخص', widths:[34,18,18,14], rows:[
     [{v:'تقرير المبيعات', s:2}], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)} (${days} يوم)`], ['تاريخ التصدير', new Date().toLocaleString('en-GB')], [],

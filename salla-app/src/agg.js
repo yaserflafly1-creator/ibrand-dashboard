@@ -65,13 +65,15 @@ const MAX_PRODUCTS = 200;
 
 // rows: ملخصات يومية. detail=false يعيد الأرقام الرئيسية فقط (للفترة السابقة).
 // المبيعات حسب التصنيف من الأيام المخزّنة: كل منتج في d.prod يُنسب لتصنيفه عبر catMap (اسم بحروف صغيرة -> تصنيف)
-export function categoryStats(rows, catMap) {
+export function categoryStats(rows, catMap, vatMap) {
   const cats = {};
   const prods = {};
   for (const d of rows) for (const k in d.prod) { const e = prods[k] || (prods[k] = [0, 0]); e[0] += d.prod[k][0]; e[1] += d.prod[k][1]; }
   let total = 0, units = 0;
-  for (const [name, [qty, val]] of Object.entries(prods)) {
-    const cat = (catMap && catMap.get(String(name).trim().toLowerCase())) || '';
+  for (const [name, [qty, val0]] of Object.entries(prods)) {
+    const key = String(name).trim().toLowerCase();
+    const cat = (catMap && catMap.get(key)) || '';
+    const val = val0 * ((vatMap && vatMap.get(key)) || 1);     // شامل الضريبة للمنتجات الخاضعة لها
     const c = cats[cat] || (cats[cat] = { name: cat, qty: 0, total: 0, products: 0 });
     c.qty += qty; c.total += val; c.products++; total += val; units += qty;
   }
@@ -80,7 +82,7 @@ export function categoryStats(rows, catMap) {
   return { list, total: r2(total), units };
 }
 
-export function sumDays(rows, detail = true) {
+export function sumDays(rows, detail = true, vatMap = null) {
   const a = { orders: 0, valid: 0, revenue: 0, productSales: 0, sold: 0, lostValue: 0, counts: { completed: 0, shipping: 0, canceled: 0, refunded: 0 } };
   const pay = {}, city = {}, src = {}, prod = {};
   const hours = new Array(24).fill(0), dow = new Array(7).fill(0);
@@ -88,7 +90,7 @@ export function sumDays(rows, detail = true) {
   for (const d of rows) {
     a.orders += d.orders; a.valid += d.valid; a.revenue += d.revenue; a.sold += d.units; a.lostValue += d.lostValue;
     for (const k of Object.keys(a.counts)) a.counts[k] += d[k] || 0;
-    for (const k in d.prod) a.productSales += d.prod[k][1];   // قيمة المنتجات فقط (كمية × سعر الكتالوج) بلا شحن ولا ضريبة
+    for (const k in d.prod) a.productSales += d.prod[k][1] * ((vatMap && vatMap.get(String(k).trim().toLowerCase())) || 1);   // قيمة المنتجات (كمية × سعر الكتالوج) بلا شحن، شاملة الضريبة للمنتجات الخاضعة لها
     if (!detail) continue;
     for (const kind of ['canceled', 'refunded']) {   // صفوف قديمة بلا lost تُحسب أصفاراً
       const l = d.lost && d.lost[kind]; if (!l) continue;

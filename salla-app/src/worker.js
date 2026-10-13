@@ -202,14 +202,17 @@ async function handleSummary(req, env) {
   const cov = await coverage(env.DB, ctx.merchant);
   const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
   campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
-  // التصنيفات: من أيام المنتجات المخزّنة + تصنيف كل منتج من الكتالوج؛ والمقارنة بالفترة السابقة
-  const catMap = await memo(`catmap:${ctx.merchant}`, 300e3, async () => new Map((await readCatalog(env.DB, ctx.merchant)).filter((r) => r.cat).map((r) => [r.name, r.cat])));
-  const catCur = categoryStats(curRows, catMap), catPrev = categoryStats(prevRows, catMap);
+  // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
+  const cat = await memo(`catmap:${ctx.merchant}`, 300e3, async () => {
+    const rows2 = await readCatalog(env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
+    return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
+  });
+  const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
   const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
-  const categories = { total: catCur.total, units: catCur.units, mapped: catMap.size > 0,
+  const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true,
     list: catCur.list.map((c) => ({ ...c, prevTotal: prevByName.get(c.name) ?? 0 })) };
   return json({
-    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns, categories,
+    cur: sumDays(curRows, true, cat.vat), prev: sumDays(prevRows, false, cat.vat), series: seriesOf(curRows), campaigns, categories,
     currency: state.currency || 'SAR',
     sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, dateMode: state.dateMode || '',
       stage: (env.CATALOG_SYNC !== 'off' && !state.catDoneOnce) ? 'catalog' : state.resyncNext ? 'resync' : state.backfillDone ? 'done' : 'backfill',

@@ -16,6 +16,8 @@ export async function ensureSchema(db) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_pending ON order_attr (merchant, att, day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_day ON order_attr (merchant, day)')
   ]);
+  // عمود الخاضع للضريبة أُضيف لاحقاً: ALTER يفشل بهدوء إن كان موجوداً
+  try { await db.prepare('ALTER TABLE catalog ADD COLUMN taxable INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* موجود */ }
   ready.add(db);
 }
 
@@ -79,11 +81,11 @@ export async function customerStats(db, m, from, to) {
 }
 
 /* كتالوج المنتجات (اسم -> سعر + صورة + تصنيف) من قائمة المنتجات؛ دفعة واحدة لكل صفحة */
-export const upsertCatalog = (db, m, map) => multiInsert(db, 'INSERT INTO catalog (merchant, name, price, img, cat)',
-  'ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img, cat = excluded.cat',
-  [...map].map(([name, v]) => [m, name, v.price, v.img || '', v.cat || '']), 5);
+export const upsertCatalog = (db, m, map) => multiInsert(db, 'INSERT INTO catalog (merchant, name, price, img, cat, taxable)',
+  'ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img, cat = excluded.cat, taxable = excluded.taxable',
+  [...map].map(([name, v]) => [m, name, v.price, v.img || '', v.cat || '', v.taxable === false ? 0 : 1]), 6);
 export async function readCatalog(db, m) {
-  const { results } = await db.prepare('SELECT name, price, img, cat FROM catalog WHERE merchant = ?').bind(m).all();
+  const { results } = await db.prepare('SELECT name, price, img, cat, taxable FROM catalog WHERE merchant = ?').bind(m).all();
   return results;
 }
 

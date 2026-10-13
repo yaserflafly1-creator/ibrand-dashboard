@@ -65,3 +65,16 @@ test('categoryStats: sales/units/share per category, uncategorized bucket, order
   assert.equal(Math.round(r.list[0].share), 50);
   assert.equal(r.units, 6);
 });
+
+test('VAT factor: product sales / category totals include tax for taxable products only', async () => {
+  const { categoryStats } = await import('../src/agg.js');
+  const d = emptyDay('2026-10-10');
+  addOrder(d, { status: 'completed', total: 300, paymentMethod: 'mada', city: 'x', source: 's', hour: 10, qty: 3, customerId: 1,
+    lines: [{ name: 'Taxed', qty: 2, price: 100, img: '' }, { name: 'Exempt', qty: 1, price: 100, img: '' }] });
+  const vat = new Map([['taxed', 1.15]]);                       // Exempt غير خاضع
+  const s = sumDays([roundDay(d)], true, vat);
+  assert.equal(s.productSales, 330);                            // 200×1.15 + 100
+  assert.equal(Math.round((s.productSales / s.sold) * 100) / 100, 110);
+  const r = categoryStats([roundDay(d)], new Map([['taxed', 'أ'], ['exempt', 'ب']]), vat);
+  assert.deepEqual(r.list.map((c) => [c.name, c.total]), [['أ', 230], ['ب', 100]]);
+});
