@@ -13,7 +13,7 @@ test('first run loads inventory first, then orders; prices come from inventory',
   const env = setup(); const calls = [];
   const get = fakeSalla({ perDay: 4, calls });
   let r = await syncMerchant(env, 'm1', { get }, NOW);
-  assert.deepEqual(r.log.slice(0, 2), ['inventory', 'recent']);   // المخزون ثم الأحدث، والأسعار جاهزة في نفس التشغيل
+  assert.deepEqual(r.log.slice(0, 3), ['inventory', 'probe:exact', 'recent']);   // المخزون ثم الأحدث، والأسعار جاهزة في نفس التشغيل
   assert.equal((await readInventory(env.DB, 'm1')).length, 2);
   const rows = await rangeRows(env.DB, 'm1', addDays(TODAY, -1), TODAY);
   assert.equal(rows.length, 2);
@@ -161,4 +161,24 @@ test('gaps are detected and healed (e.g. an abandoned resync leaves missing days
   await setMeta(env.DB, 'm1', 'state', { ...st, lastGapHour: -1 });
   for (let i = 0; i < 30; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
   assert.equal(await all(), 21);
+});
+
+test('date semantics probe: exact range when the API filters precisely, expanded window otherwise', async () => {
+  for (const [inclusive, mode] of [[true, 'exact'], [false, 'expand']]) {
+    clearPriceCache();
+    const env = setup({ INVENTORY_SYNC: 'off' });
+    const get = fakeSalla({ perDay: 4, inclusive });
+    await syncMerchant(env, 'm1', { get }, NOW);
+    assert.equal((await getMeta(env.DB, 'm1', 'state', {})).dateMode, mode);
+  }
+});
+
+test('heavy single day (many pages) completes in exact mode within the budget', async () => {
+  clearPriceCache();
+  const env = setup({ INVENTORY_SYNC: 'off', BACKFILL_DAYS: '6', SYNC_BUDGET: '40' });
+  const get = fakeSalla({ perDay: (d) => (d <= addDays(TODAY, -3) && d >= addDays(TODAY, -5) ? 300 : 25) });   // أيام تخفيضات ثقيلة (10 صفحات) بين أيام هادئة؛ موسّعةً 3 أيام = 30 صفحة لا تتسع
+  let t = NOW, done = false;
+  for (let i = 0; i < 80 && !done; i++, t += 60000) done = !!(await syncMerchant(env, 'm1', { get }, t)).backfillDone;
+  assert.ok(done, 'backfill finishes despite heavy days');
+  assert.equal((await rangeRows(env.DB, 'm1', addDays(TODAY, -6), TODAY)).length, 7);
 });

@@ -205,7 +205,7 @@ async function handleSummary(req, env) {
   return json({
     cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns,
     currency: state.currency || 'SAR',
-    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce,
+    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, dateMode: state.dateMode || '',
       stage: (env.CATALOG_SYNC !== 'off' && !state.catDoneOnce) ? 'catalog' : state.resyncNext ? 'resync' : state.backfillDone ? 'done' : 'backfill',
       catPage: state.catPage || 1, resyncNext: state.resyncNext || null, backfillNext: state.backfillNext || null, lastRunAt: state.lastRunAt || 0, lastLog: state.lastLog || [], lastUsed: state.lastUsed || 0, error: state.lastError || (env.INVENTORY_SYNC === 'off' ? '' : state.invError) || state.catError || '' }
   });

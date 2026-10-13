@@ -37,7 +37,7 @@ export function fakeSalla({ perDay = 4, inclusive = true, firstDay = '2000-01-01
       if (!inclusive) { from = addDays(from, 1); to = addDays(to, -1); }   // دلالة حصرية لاختبار المتانة
       for (let d = from; d <= to; d = addDays(d, 1)) {
         if (d < firstDay) continue;
-        for (let i = 0; i < perDay; i++) orders.push({ id: Number(d.replace(/-/g, '')) * 100 + i, reference_id: 1000 + i, total: { amount: 100, currency: 'SAR' },
+        for (let i = 0; i < (typeof perDay === 'function' ? perDay(d) : perDay); i++) orders.push({ id: Number(d.replace(/-/g, '')) * 100 + i, reference_id: 1000 + i, total: { amount: 100, currency: 'SAR' },
           date: { date: `${d} 10:15:00.000000` }, status: { slug: i === 0 ? 'canceled' : 'completed' }, payment_method: 'mada',
           items: [{ name: 'Dress', quantity: 1, thumbnail: null }], customer: { id: i, full_name: 'عميل', city: 'جدة' }, source: 'store' });
       }

@@ -42,8 +42,8 @@ export function priceLines(order, map) {
 
 /* يجلب طلبات الأيام [a..b] ويكتب ملخصاتها. يرجع { ok, pages }؛ ok=false إن تجاوز الميزانية قبل الاكتمال (لا يُكتب شيء). */
 async function syncOrdersRange(ctx, a, b) {
-  // نوسّع النطاق يوماً من كل جهة (دلالة from_date/to_date في الوثيقة غير محسومة) ثم نصفّي بتاريخ الطلب نفسه
-  const from = addDays(a, -1), to = addDays(b, 1);
+  // نوسّع النطاق يوماً من كل جهة (دلالة from_date/to_date غير محسومة) ثم نصفّي بتاريخ الطلب نفسه؛ وإن أثبت الفحص (probeDateMode) دقة التصفية نجلب النطاق نفسه فقط (أرخص بكثير للأيام الثقيلة)
+  const from = ctx.dateExact ? a : addDays(a, -1), to = ctx.dateExact ? b : addDays(b, 1);
   const days = new Map();
   for (let d = a; d <= b; d = addDays(d, 1)) days.set(d, emptyDay(d));
   let pages = 0;
@@ -87,6 +87,36 @@ async function attributionChunk(ctx, limit) {
     if (res.some((r) => r.err && /salla 429\b/.test(r.err))) break;   // حد معدّل سلة: نتوقف حتى التشغيل التالي
   }
   return done;
+}
+
+/* فحص مرة واحدة: هل from_date=to_date=D يعيد كل طلبات اليوم D (بتوقيت الرياض) كما تعيدها نافذة موسّعة؟
+   نعم => state.dateMode='exact' (بلا توسيع)، لا => 'expand'. يُؤجَّل إن لم تتسع الميزانية أو كان اليوم بلا طلبات. */
+async function probeDateMode(ctx, state, today) {
+  // نبحث عن يوم هادئ (≤5 صفحات بالنطاق الدقيق و≤16 بالموسّع) كي يتسع الفحص في دورة واحدة حتى لو كانت أيام المتجر ثقيلة
+  const readAll = async (D, from, to, maxPages) => {
+    let n = 0;
+    for (let page = 1; ; page++) {
+      if (ctx.used + 4 >= ctx.budget) return null;
+      const j = await ctx.get('/orders', { from_date: from, to_date: to, per_page: 30, page });
+      const tp = j.pagination?.totalPages ?? 1;
+      if (page === 1 && tp > maxPages) return -1;           // ثقيل: نجرّب يوماً آخر
+      for (const raw of j.data || []) { const o = normalizeOrder(raw); if (!o.draft && o.status !== 'unpaid' && o.day === D) n++; }
+      if (page >= tp) break;
+    }
+    return n;
+  };
+  for (let k = 0; k < 4; k++) {
+    const D = addDays(today, -3 - (state.probeTries || 0));
+    state.probeTries = (state.probeTries || 0) + 1;
+    const exact = await readAll(D, D, D, 5);
+    if (exact === null) { state.probeTries--; return; }   // لا ميزانية الآن: نعيد لاحقاً
+    if (exact < 0) continue;                              // ثقيل: نجرّب يوماً آخر
+    const wide = await readAll(D, addDays(D, -1), addDays(D, 1), 16);
+    if (wide === null) { state.probeTries--; return; }
+    if (wide <= 0) continue;                              // ثقيل جداً أو يوم بلا طلبات
+    state.dateMode = exact === wide ? 'exact' : 'expand';
+    return;
+  }
 }
 
 /* دفعة أيام للخلف من المؤشر ptr حتى الحد lower. تضبط حجم الدفعة حسب متوسط الصفحات لكل يوم. */
@@ -160,6 +190,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
   if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); state.resyncLow = addDays(today, -30); state.deepAt = now; }
   state.invGen = state.invGen || 1;
+  ctx.dateExact = state.dateMode === 'exact';
   const log = [];
   const invOn = env.INVENTORY_SYNC !== 'off', catOn = env.CATALOG_SYNC !== 'off';
 
@@ -182,6 +213,8 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     };
     if (catDue && !state.catDoneOnce) await catRun(Math.floor((ctx.budget - ctx.used) / 2));
     const ready = (!invOn || state.invDoneOnce || (state.invTries || 0) >= 15) && (!catOn || state.catDoneOnce || (state.catTries || 0) >= 15);
+
+    if (ready && !state.dateMode && (state.probeTries || 0) < 6) { try { await probeDateMode(ctx, state, today); } catch (e) { state.probeError = String(e.message || e).slice(0, 100); } ctx.dateExact = state.dateMode === 'exact'; if (state.dateMode) log.push('probe:' + state.dateMode); }
 
     // 2) أحدث يومين: كل ~5 دقائق
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {
