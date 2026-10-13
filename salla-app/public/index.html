@@ -1318,7 +1318,19 @@ $('#export').addEventListener('click', exportReport);
 })();
 
 /* ---- روابط المشاركة (للقراءة فقط) ---- */
-let shDays = 7, shNewUrl = '';
+let shDays = 7, shNewUrl = '', shNewLabel = '';
+// نسخ موثوق داخل إطار سلة: Clipboard API قد تُمنع في iframe، فنرجع إلى execCommand ثم إلى تحديد النص يدوياً
+async function copyText(text, inputEl){
+  try{ if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(text); return true; } }catch(e){}
+  try{
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly',''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+    document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy'); ta.remove(); if(ok) return true;
+  }catch(e){}
+  if(inputEl){ inputEl.focus(); inputEl.select(); inputEl.setSelectionRange(0, text.length); }
+  return false;
+}
+const waLink = (url, label) => 'https://wa.me/?text=' + encodeURIComponent((label ? 'مرحباً '+label+'، ' : '') + 'هذا رابط لوحة مبيعات المتجر (للقراءة فقط): ' + url);
 const shDate = ms => new Date(ms).toLocaleDateString('en-GB');
 async function shareList(){
   const body = $('#shareDlgBody');
@@ -1327,26 +1339,30 @@ async function shareList(){
   const chip = (d, t) => `<button type="button" class="btn ${shDays===d?'btn-primary':''}" data-days="${d}">${t}</button>`;
   body.innerHTML = `<h2 style="margin-bottom:6px">مشاركة اللوحة</h2>
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:12px">رابط للقراءة فقط: يعرض الأرقام والرسوم والمنتجات والمخزون، بدون أسماء العملاء والطلبات. من يملك الرابط يراها دون حساب سلة، فشاركه بحذر.</p>
-    <input id="shLabel" placeholder="لمن الرابط؟ (اختياري)" style="width:100%;padding:8px;border:1px solid #f0cfe0;border-radius:10px;margin-bottom:8px">
+    <input id="shLabel" type="text" autocomplete="off" maxlength="60" placeholder="اسم الشخص الذي ستشاركه (اختياري)" style="width:100%;padding:8px;border:1px solid #f0cfe0;border-radius:10px;margin-bottom:8px">
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="align-self:center;font-size:.85rem">المدة:</span>${chip(1,'يوم')}${chip(7,'7 أيام')}${chip(30,'30 يوماً')}${chip(90,'90 يوماً')}</div>
     <button class="btn btn-primary" id="shNew" type="button" style="margin-bottom:14px">إنشاء رابط</button>
-    ${shNewUrl ? `<div style="background:var(--pink-50,#fdf2f8);border:1px solid var(--pink-700,#db2777);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.82rem"><b>تم إنشاء الرابط ✓</b><input readonly value="${esc(shNewUrl)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()"><button class="linkbtn" data-copy="${esc(shNewUrl)}" type="button">نسخ الرابط</button></div>` : ''}
+    ${shNewUrl ? `<div style="background:var(--pink-50,#fdf2f8);border:1px solid var(--pink-700,#db2777);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.82rem"><b>تم إنشاء الرابط ✓${shNewLabel ? ' · لـ '+esc(shNewLabel) : ''}</b><input readonly value="${esc(shNewUrl)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()"><button class="btn btn-primary" data-copy="${esc(shNewUrl)}" type="button">نسخ الرابط</button> <a class="btn" href="${esc(waLink(shNewUrl, shNewLabel))}" target="_blank" rel="noopener noreferrer">إرسال عبر واتساب</a></div>` : ''}
     <div id="shList">${list.length ? list.map(x => `<div style="border:1px solid #f0cfe0;border-radius:12px;padding:10px;margin-bottom:8px;font-size:.82rem">
         <div><b>${esc(x.label||'بدون اسم')}</b> · ينتهي ${shDate(x.exp)}</div>
         <input readonly value="${esc(x.url)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()">
-        <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button></div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
+        <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <a class="linkbtn" href="${esc(waLink(x.url, x.label))}" target="_blank" rel="noopener noreferrer">واتساب</a> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button></div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
     <button class="btn" id="shClose" type="button" style="margin-top:8px">إغلاق</button>`;
   body.querySelectorAll('[data-days]').forEach(b => b.onclick = () => { const l = $('#shLabel').value; shDays = Number(b.dataset.days); shNewUrl = ''; shareList().then(() => { $('#shLabel').value = l; }); });
   $('#shNew').onclick = async () => {
-    try{ const c = await api('/api/share', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({label:$('#shLabel').value, days:shDays})}); shNewUrl = c.url; }
+    const label = $('#shLabel').value.trim();
+    try{ const c = await api('/api/share', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({label, days:shDays})}); shNewUrl = c.url; shNewLabel = label; }
     catch(e){ toast('تعذّر إنشاء الرابط'); }
     shareList();
   };
   $('#shClose').onclick = () => $('#shareDlg').close();
-  body.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy).then(() => toast('تم نسخ الرابط'), () => toast('انسخه يدوياً')); });
+  body.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+    const inp = b.parentElement.querySelector('input[readonly]');
+    toast(await copyText(b.dataset.copy, inp) ? 'تم نسخ الرابط ✓' : 'حدّدتُ الرابط لك، اضغط مطولاً ثم «نسخ»');
+  });
   body.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try{ await api('/api/share?id='+b.dataset.del, {method:'DELETE'}); }catch(e){} shareList(); });
 }
-document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ shNewUrl = ''; $('#shareDlg').showModal(); shareList(); } });
+document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ shNewUrl = ''; shNewLabel = ''; $('#shareDlg').showModal(); shareList(); } });
 
 async function boot(){
   if(LIVE && SDK && !SHARE){
