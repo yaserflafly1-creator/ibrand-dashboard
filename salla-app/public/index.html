@@ -897,7 +897,11 @@ function renderSyncInfo(from){
   const el = $('#syncInfo'); if(!el) return;
   if(!LIVE || !syncInfo){ el.textContent = ''; return; }
   const parts = [];
-  if(!syncInfo.backfillDone) parts.push(`جارٍ تحميل تاريخ المتجر من سلة${syncInfo.oldest?` (وصلنا إلى ${syncInfo.oldest})`:''}`);
+  if(!syncInfo.backfillDone){
+    const st = syncInfo.stage, at = syncInfo.lastRunAt ? new Date(syncInfo.lastRunAt).toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}) : '';
+    const stage = st==='catalog' ? `المرحلة ١: تجهيز أسعار المنتجات (صفحة ${syncInfo.catPage})` : st==='resync' ? `المرحلة ٢: تحديث آخر 30 يوماً (وصلنا إلى ${syncInfo.resyncNext||''})` : `المرحلة ٣: تحميل الأرشيف (وصلنا إلى ${syncInfo.backfillNext||syncInfo.oldest||''})`;
+    parts.push(`جارٍ تحميل تاريخ المتجر من سلة · ${stage}${at?` · آخر دورة ${at}`:''}`);
+  }
   if(syncInfo.oldest && ymd(from) < syncInfo.oldest) parts.push('بعض أيام هذه الفترة لم تُحمَّل بعد فالأرقام جزئية');
   if(!syncInfo.inventoryReady && !syncInfo.inventoryOff) parts.push('جارٍ تجهيز المخزون وأسعار المنتجات');
   if(syncInfo.error && !(syncInfo.inventoryOff && /quantities/.test(syncInfo.error))) parts.push('تنبيه المزامنة: '+syncInfo.error);

@@ -212,6 +212,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
     if (ctx.currency) state.currency = ctx.currency;
     state.lastError = '';
+    state.lastRunAt = now; state.lastLog = log.slice(0, 6); state.lastUsed = ctx.used;
   } catch (e) {
     state.lastError = String(e.message || e).slice(0, 160); state.lastErrorAt = now;
     throw e;
