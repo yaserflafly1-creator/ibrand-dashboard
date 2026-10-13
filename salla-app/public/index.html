@@ -1196,8 +1196,12 @@ function calPaint(){
 $('#calBody').addEventListener('click', e => {
   const el = e.target.closest('.d'); if(!el || el.classList.contains('dis')) return;
   const t = Number(el.dataset.t);
-  if(cal.a==null || cal.b!=null){ cal.a = t; cal.b = null; cal.hover = null; } else { cal.b = t; }
-  calRender();
+  if(cal.a==null || cal.b!=null){ cal.a = t; cal.b = null; cal.hover = null; calRender(); }
+  else {   // يوم النهاية: نُظهر التظليل لحظة ثم نطبّق تلقائياً (زر «تطبيق» يبقى متاحاً)
+    cal.b = t; calRender();
+    const lo = Math.min(cal.a, cal.b), hi = Math.max(cal.a, cal.b);
+    clearTimeout(cal.timer); cal.timer = setTimeout(() => { if($('#calDlg').open && cal.b===t) calApply(lo, hi); }, 350);
+  }
 });
 $('#calBody').addEventListener('mouseover', e => {
   const el = e.target.closest('.d'); if(!el || el.classList.contains('dis') || cal.a==null || cal.b!=null) return;
@@ -1205,6 +1209,7 @@ $('#calBody').addEventListener('mouseover', e => {
   cal.hover = t; calPaint();
 });
 function calApply(a, b){
+  clearTimeout(cal.timer);
   if(a==null) return;
   const f = new Date(Math.min(a,b)), t = new Date(Math.max(a,b));
   $('#from').value = ymd(f); $('#to').value = ymd(t);
