@@ -2,7 +2,7 @@
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, initCustFirst, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
 const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
@@ -13,15 +13,29 @@ const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.pa
 
 /* خريطة اسم المنتج -> سعر، مأخوذة من جدول المخزون (Product Quantities يحمل الاسم والسعر) */
 const priceCache = new Map();
-export async function priceMap(db, merchant) {
+// لقطة الكتالوج في KV (قراءة واحدة بدل آلاف صفوف D1 كل دقيقة؛ حد القراءة اليومي في D1 المجاني 5 ملايين صف)
+export async function catalogBlob(kv, db, merchant, force = false) {
+  const key = `catalog:${merchant}`;
+  if (kv && !force) {
+    const raw = await kv.get(key);
+    if (raw) { try { return JSON.parse(raw).map(([name, price, img, cat, taxable]) => ({ name, price, img, cat, taxable })); } catch (e) { /* نعيد البناء */ } }
+  }
+  const rows = await readCatalog(db, merchant);
+  if (kv && rows.length) await kv.put(key, JSON.stringify(rows.map((r) => [r.name, r.price, r.img, r.cat, r.taxable])));
+  return rows;
+}
+export async function priceMap(db, merchant, kv = null) {
   const hit = priceCache.get(merchant);
   if (hit && hit.exp > Date.now()) return hit.map;
   const map = new Map();
-  for (const r of await readCatalog(db, merchant)) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img, cat: r.cat });
-  for (const r of await readPrices(db, merchant)) if (r.price > 0 && !map.has(r.name)) map.set(r.name, { price: r.price, img: r.img, cat: '' });
-  for (const it of await readInventory(db, merchant)) {
-    const key = String(it.name).trim().toLowerCase();
-    if (it.price > 0 && !map.has(key)) map.set(key, { price: it.price, img: it.img });
+  const cat = await catalogBlob(kv, db, merchant);
+  for (const r of cat) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img, cat: r.cat });
+  if (!map.size) {   // الكتالوج لم يُجلب بعد: أسعار قديمة (جدول prices) ثم المخزون
+    for (const r of await readPrices(db, merchant)) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img, cat: '' });
+    for (const it of await readInventory(db, merchant)) {
+      const key = String(it.name).trim().toLowerCase();
+      if (it.price > 0 && !map.has(key)) map.set(key, { price: it.price, img: it.img });
+    }
   }
   priceCache.set(merchant, { map, exp: Date.now() + 600e3 });
   return map;
@@ -143,7 +157,7 @@ async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
     await upsertCatalog(ctx.db, ctx.merchant, buildPriceMap(j.data));
     if (page >= (j.pagination?.totalPages ?? 1)) {
       state.catPage = 1; state.catDoneOnce = true; state.catNextAt = now + 6 * 3600e3;
-      clearPriceCache(); ctx.prices = await priceMap(ctx.db, ctx.merchant);
+      clearPriceCache(); await catalogBlob(ctx.kv, ctx.db, ctx.merchant, true); ctx.prices = await priceMap(ctx.db, ctx.merchant, ctx.kv);
       return true;
     }
     page++; state.catPage = page;
@@ -162,7 +176,7 @@ async function inventoryChunk(ctx, state, now, maxCalls = Infinity) {
       await dropOldInventory(ctx.db, ctx.merchant, state.invGen);
       state.invGen++; state.invPage = 1; state.invDoneOnce = true; state.invNextAt = now + 3600e3; state.invUpdatedAt = now;
       clearPriceCache();
-      ctx.prices = await priceMap(ctx.db, ctx.merchant);   // الأسعار الجديدة متاحة لبقية هذا التشغيل
+      ctx.prices = await priceMap(ctx.db, ctx.merchant, ctx.kv);   // الأسعار الجديدة متاحة لبقية هذا التشغيل
       return true;
     }
     page++; state.invPage = page;
@@ -182,7 +196,9 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const get = ctxBase.get;
   ctx.get = async (path, params) => { ctx.used++; return get(path, params); };
   setDbHook(() => { ctx.used++; });
-  ctx.prices = await priceMap(db, merchant);
+  ctx.kv = env.TOKENS;
+  ctx.prices = await priceMap(db, merchant, ctx.kv);
+  if (!state.custFirstInit) { ctx.used++; await initCustFirst(db, merchant); state.custFirstInit = true; }   // تعبئة أول يوم شراء للعملاء من البيانات السابقة (مرة واحدة)
 
   const today = riyadhDay(now);
   ctx.attrFloor = addDays(today, -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
@@ -250,17 +266,23 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
       const r = await chunk(ctx, state, state.resyncNext, resyncLow);
       state.resyncNext = r.done ? null : r.ptr; log.push('resync');
     } else if (ready && ctx.used < ctx.budget && (!state.backfillDone || state.lastGapHour !== hour)) {
-      // الأرشيف بالاكتشاف لا بالمؤشر: نملأ أحدث مقطع أيام مفقودة (أي يوم بلا صف)، فلا تبقى فجوات مهما انقطعت المزامنة
-      ctx.used++;   // قراءة D1
-      const have = new Set(await loadedDays(db, merchant, floor, today));
-      let hi = null;
-      for (let d = today; d >= floor; d = addDays(d, -1)) if (!have.has(d)) { hi = d; break; }
-      if (!hi) { state.backfillDone = true; state.backfillNext = null; state.lastGapHour = hour; }
-      else {
-        let lo = hi;
-        while (lo > floor && !have.has(addDays(lo, -1))) lo = addDays(lo, -1);
-        state.backfillDone = false; state.backfillNext = hi;
-        await chunk(ctx, state, hi, lo); log.push('backfill');
+      // الأرشيف بالاكتشاف: نملأ أحدث مقطع أيام مفقودة (أي يوم بلا صف). نفحص الفجوات مرة لكل مقطع لا كل دقيقة (قراءة D1 محدودة يومياً)
+      if (!(state.gapPtr && state.gapLo && state.gapPtr >= state.gapLo)) {
+        ctx.used++;
+        const have = new Set(await loadedDays(db, merchant, floor, today));
+        let hi = null;
+        for (let d = today; d >= floor; d = addDays(d, -1)) if (!have.has(d)) { hi = d; break; }
+        if (!hi) { state.backfillDone = true; state.backfillNext = null; state.gapPtr = null; state.gapLo = null; state.lastGapHour = hour; }
+        else {
+          let lo = hi;
+          while (lo > floor && !have.has(addDays(lo, -1))) lo = addDays(lo, -1);
+          state.backfillDone = false; state.gapPtr = hi; state.gapLo = lo;
+        }
+      }
+      if (state.gapPtr && state.gapLo && state.gapPtr >= state.gapLo) {
+        state.backfillNext = state.gapPtr;
+        const r = await chunk(ctx, state, state.gapPtr, state.gapLo); log.push('backfill');
+        state.gapPtr = r.ptr;   // التالي: ما قبل ما أُنجز (إن تجاوز gapLo نفحص من جديد؛ وعند الفشل يبقى كما هو)
       }
     }
 

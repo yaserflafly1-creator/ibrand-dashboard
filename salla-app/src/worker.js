@@ -1,7 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
 import { sumDays, seriesOf, categoryStats } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, readCatalog } from './db.js';
-import { syncMerchant, priceMap, priceLines, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog } from './db.js';
+import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
 const memoStore = new Map();
@@ -203,11 +203,11 @@ async function handleSummary(req, env) {
     const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
     const state = await getMeta(env.DB, ctx.merchant, 'state', {});
     const cov = await coverage(env.DB, ctx.merchant);
-    const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
+    const campaigns = await memo(`camp:${ctx.merchant}:${from}:${to}`, 600e3, () => campaignStats(env.DB, ctx.merchant, from, to));
     campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
     // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
-    const cat = await memo(`catmap:${ctx.merchant}`, 300e3, async () => {
-      const rows2 = await readCatalog(env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
+    const cat = await memo(`catmap:${ctx.merchant}`, 600e3, async () => {
+      const rows2 = await catalogBlob(env.TOKENS, env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
       return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
     });
     const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
@@ -233,7 +233,7 @@ async function handleRecent(req, env) {
   const body = await memo(`recent:${ctx.merchant}`, 30e3, async () => {
     await ensureSchema(env.DB);
     const j = await ctx.get('/orders', { per_page: 30, page: 1, sort_by: 'created_at-desc' });
-    const map = await priceMap(env.DB, ctx.merchant);
+    const map = await priceMap(env.DB, ctx.merchant, env.TOKENS);
     const orders = (j.data || []).map(normalizeOrder).filter((o) => !o.draft && o.status !== 'unpaid');
     orders.forEach((o) => priceLines(o, map));
     return { orders };
@@ -296,8 +296,13 @@ async function handleCustomers(req, env) {
   const from = q.get('from'), to = q.get('to');
   // واجهة /customers في سلة بلا إجمالي (ترقيم cursor)، فالعملاء يُحسبون من الطلبات المحمّلة في D1
   await ensureSchema(env.DB);
-  const state = await getMeta(env.DB, ctx.merchant, 'state', {});
-  return json({ ...(await customerStats(env.DB, ctx.merchant, from, to)), backfillDone: !!state.backfillDone, error: state.custError || '' });
+  // أرقام العملاء لا تحتاج لحظية: 10 دقائق للفترة، و6 ساعات للعدد الكلي (يقرأ كل الجدول)
+  const body = await memo(`cust:${ctx.merchant}:${from}:${to}`, 600e3, async () => {
+    const state = await getMeta(env.DB, ctx.merchant, 'state', {});
+    const total = await memo(`custtotal:${ctx.merchant}`, 6 * 3600e3, () => customerTotal(env.DB, ctx.merchant));
+    return { ...(await customerStats(env.DB, ctx.merchant, from, to)), total, backfillDone: !!state.backfillDone, error: state.custError || '' };
+  });
+  return json(body);
 }
 
 /* ---------- Cron: المزامنة لكل تاجر مثبّت ---------- */

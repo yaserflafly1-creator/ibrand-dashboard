@@ -13,6 +13,8 @@ export async function ensureSchema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS catalog (merchant TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL, img TEXT NOT NULL DEFAULT '', cat TEXT NOT NULL DEFAULT '', PRIMARY KEY (merchant, name))"),
     db.prepare('CREATE TABLE IF NOT EXISTS cust_day (merchant TEXT NOT NULL, cid TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (merchant, cid, day))'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_cust_day ON cust_day (merchant, day)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS cust_first (merchant TEXT NOT NULL, cid TEXT NOT NULL, first_day TEXT NOT NULL, PRIMARY KEY (merchant, cid))'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_cust_first ON cust_first (merchant, first_day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_pending ON order_attr (merchant, att, day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_day ON order_attr (merchant, day)')
   ]);
@@ -32,14 +34,15 @@ export const setMeta = (db, m, k, v) =>
 let dbHook = null;
 export const setDbHook = (fn) => { dbHook = fn; };
 // إدخال متعدد الصفوف: عبارة واحدة لكل ≤100 معامل (حد D1)، وكل 50 عبارة في db.batch واحد => نداء فرعي واحد لآلاف الصفوف
-function multiInsert(db, head, tail, rows, perRow) {
+function multiStmts(db, head, tail, rows, perRow) {
   const per = Math.max(1, Math.floor(100 / perRow)), stmts = [];
   for (let i = 0; i < rows.length; i += per) {
     const chunk = rows.slice(i, i + per);
     stmts.push(db.prepare(`${head} VALUES ${chunk.map(() => '(' + new Array(perRow).fill('?').join(',') + ')').join(',')} ${tail}`).bind(...chunk.flat()));
   }
-  return batched(db, stmts, 50);
+  return stmts;
 }
+const multiInsert = (db, head, tail, rows, perRow) => batched(db, multiStmts(db, head, tail, rows, perRow), 50);
 async function batched(db, stmts, size = 40) {
   for (let i = 0; i < stmts.length; i += size) { if (dbHook) dbHook(); await db.batch(stmts.slice(i, i + size)); }
 }
@@ -68,16 +71,30 @@ export const upsertInventory = (db, m, gen, items) => batched(db, items.map((it)
     .bind(m, `${it.id}:${it.skuId || 0}`, gen, JSON.stringify(it))));
 export const dropOldInventory = (db, m, gen) => db.prepare('DELETE FROM inventory WHERE merchant = ? AND gen < ?').bind(m, gen).run();
 /* العملاء من الطلبات: صف لكل (عميل، يوم شراء) لطلبات مكتملة/قيد التنفيذ؛ الجدد = أول يوم شراء ضمن الفترة */
-export const upsertCustDays = (db, m, pairs) => multiInsert(db, 'INSERT OR IGNORE INTO cust_day (merchant, cid, day)', '',
-  pairs.map(([cid, day]) => [m, String(cid), day]), 3);
+export const upsertCustDays = (db, m, pairs) => {
+  // أول يوم شراء لكل عميل (أصغر يوم) في جدول مستقل كي لا نفحص كل الجدول عند حساب الجدد
+  const first = new Map();
+  for (const [cid, day] of pairs) { const k = String(cid); if (!first.has(k) || day < first.get(k)) first.set(k, day); }
+  return batched(db, [
+    ...multiStmts(db, 'INSERT OR IGNORE INTO cust_day (merchant, cid, day)', '', pairs.map(([cid, day]) => [m, String(cid), day]), 3),
+    ...multiStmts(db, 'INSERT INTO cust_first (merchant, cid, first_day)', 'ON CONFLICT(merchant, cid) DO UPDATE SET first_day = excluded.first_day WHERE excluded.first_day < cust_first.first_day',
+      [...first].map(([cid, day]) => [m, cid, day]), 3)
+  ], 50);
+};
+// تعبئة cust_first من cust_day مرة واحدة (بيانات سابقة لإضافة الجدول)
+export const initCustFirst = (db, m) => db.prepare('INSERT INTO cust_first (merchant, cid, first_day) SELECT merchant, cid, MIN(day) FROM cust_day WHERE merchant = ? GROUP BY cid ON CONFLICT(merchant, cid) DO UPDATE SET first_day = excluded.first_day WHERE excluded.first_day < cust_first.first_day').bind(m).run();
 export async function customerStats(db, m, from, to) {
-  const [t, r, n] = await Promise.all([
-    db.prepare('SELECT COUNT(DISTINCT cid) AS c FROM cust_day WHERE merchant = ?').bind(m).first(),
+  // كل استعلام يقرأ صفوف الفترة فقط عبر الفهارس (لا فحص كامل للجدول): العدد الكلي يُخزَّن مؤقتاً في الاستدعاء
+  const [r, n] = await Promise.all([
     db.prepare('SELECT COUNT(DISTINCT cid) AS c FROM cust_day WHERE merchant = ? AND day BETWEEN ? AND ?').bind(m, from, to).first(),
-    db.prepare('SELECT COUNT(*) AS c FROM (SELECT cid, MIN(day) AS d FROM cust_day WHERE merchant = ? GROUP BY cid) WHERE d BETWEEN ? AND ?').bind(m, from, to).first()
+    db.prepare('SELECT COUNT(*) AS c FROM cust_first WHERE merchant = ? AND first_day BETWEEN ? AND ?').bind(m, from, to).first()
   ]);
-  const total = t?.c || 0, active = r?.c || 0, fresh = n?.c || 0;
-  return { total, active, fresh, returning: Math.max(0, active - fresh) };
+  const active = r?.c || 0, fresh = n?.c || 0;
+  return { active, fresh, returning: Math.max(0, active - fresh) };
+}
+export async function customerTotal(db, m) {
+  const t = await db.prepare('SELECT COUNT(*) AS c FROM cust_first WHERE merchant = ?').bind(m).first();
+  return t?.c || 0;
 }
 
 /* كتالوج المنتجات (اسم -> سعر + صورة + تصنيف) من قائمة المنتجات؛ دفعة واحدة لكل صفحة */
@@ -119,11 +136,18 @@ export const setAttr = (db, m, items) => batched(db, items.map((it) =>
 
 const VALID_SQL = "status IN ('completed', 'shipping')";
 export async function campaignStats(db, m, from, to) {
-  const base = [m, from, to];
-  const [sources, campaigns, cov] = await Promise.all([
-    db.prepare(`SELECT src AS k, COUNT(*) AS orders, ROUND(SUM(total), 2) AS total FROM order_attr WHERE merchant = ? AND day BETWEEN ? AND ? AND att = 1 AND ${VALID_SQL} GROUP BY src ORDER BY total DESC`).bind(...base).all(),
-    db.prepare(`SELECT src, camp, COUNT(*) AS orders, ROUND(SUM(total), 2) AS total FROM order_attr WHERE merchant = ? AND day BETWEEN ? AND ? AND att = 1 AND camp != '' AND ${VALID_SQL} GROUP BY src, camp ORDER BY total DESC LIMIT 40`).bind(...base).all(),
-    db.prepare(`SELECT COALESCE(SUM(att), 0) AS attributed, COUNT(*) AS total FROM order_attr WHERE merchant = ? AND day BETWEEN ? AND ? AND ${VALID_SQL}`).bind(...base).first()
-  ]);
-  return { sources: sources.results, campaigns: campaigns.results, attributed: cov?.attributed || 0, total: cov?.total || 0 };
+  // استعلام واحد يقرأ صفوف الفترة مرة واحدة ثم نجمّعها هنا (كانت ثلاثة استعلامات تقرأ الصفوف نفسها)
+  const { results } = await db.prepare(`SELECT att, src, camp, COUNT(*) AS orders, ROUND(SUM(total), 2) AS total FROM order_attr WHERE merchant = ? AND day BETWEEN ? AND ? AND ${VALID_SQL} GROUP BY att, src, camp`).bind(m, from, to).all();
+  const src = {}, camps = [];
+  let attributed = 0, total = 0;
+  for (const r of results) {
+    total += r.orders;
+    if (r.att !== 1) continue;
+    attributed += r.orders;
+    const e = src[r.src] || (src[r.src] = { k: r.src, orders: 0, total: 0 });
+    e.orders += r.orders; e.total += r.total;
+    if (r.camp) camps.push({ src: r.src, camp: r.camp, orders: r.orders, total: r.total });
+  }
+  const byTotal = (a, b) => b.total - a.total;
+  return { sources: Object.values(src).map((e) => ({ ...e, total: Math.round(e.total * 100) / 100 })).sort(byTotal), campaigns: camps.sort(byTotal).slice(0, 40), attributed, total };
 }

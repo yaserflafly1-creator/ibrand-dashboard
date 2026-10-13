@@ -1005,7 +1005,7 @@ async function update(){
       CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
       PRODUCTS.length = 0; const idx = {};
       currentList = r.orders.map(o => mapOrder(o, idx));
-    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return SHARE ? shareExpired() : sessionExpired(); toast('تعذّر جلب بيانات المتجر ('+e.message+(e.detail?': '+String(e.detail).slice(0,80):'')+')'); signalReady(); return; }
+    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return SHARE ? shareExpired() : sessionExpired(); toast(/free tier|row (read|write)/i.test(e.detail||'') ? 'تجاوزتَ حد قاعدة البيانات اليومي في الخطة المجانية؛ يتجدد الساعة 3 فجراً بتوقيت الرياض (أو رقِّ الخطة لإلغاء الحد)' : 'تعذّر جلب بيانات المتجر ('+e.message+(e.detail?': '+String(e.detail).slice(0,80):'')+')'); signalReady(); return; }
   } else {
     cur = aggregate(from, to); prev = aggregate(pFrom, pTo); currentList = cur.list; syncInfo = null;
   }

@@ -139,10 +139,10 @@ test('customers: distinct buyers, new vs returning, from orders', async () => {
   const env = setup({ BACKFILL_DAYS: '3' });
   const base = fakeSalla({ perDay: 4 });          // العملاء 0..3 كل يوم؛ 0 ملغي دائماً
   await syncMerchant(env, 'm1', { get: base }, NOW);
-  const { customerStats } = await import('../src/db.js');
+  const { customerStats, customerTotal } = await import('../src/db.js');
   const s = await customerStats(env.DB, 'm1', addDays(TODAY, -1), TODAY);
   assert.equal(s.active, 3);                      // ١..٣ (٠ ملغي لا يُحسب)
-  assert.equal(s.total, 3);
+  assert.equal(await customerTotal(env.DB, 'm1'), 3);
   assert.equal(s.fresh + s.returning, s.active);
 });
 
@@ -196,4 +196,18 @@ test('catalog refresh (e.g. new category data) is not starved by a running archi
   await setMeta(env.DB, 'm1', 'state', { ...st, catVer: 1 });      // نسخة قديمة => تحديث للكتالوج مطلوب
   for (let i = 0; i < 3; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
   assert.ok((await rc(env.DB, 'm1')).length >= 2, 'catalog refreshed while backfill is still running');
+});
+
+test('customers: first purchase day tracked across days (new vs returning) and migration from cust_day', async () => {
+  const env = setup(); await ensureSchema(env.DB);
+  const { upsertCustDays, customerStats, customerTotal, initCustFirst } = await import('../src/db.js');
+  await upsertCustDays(env.DB, 'm1', [['a', '2026-10-05'], ['b', '2026-10-05'], ['a', '2026-10-09']]);   // a اشترى مرتين
+  await upsertCustDays(env.DB, 'm1', [['a', '2026-09-01']]);                                              // أرشيف أقدم يُحدّث أول يوم شراء
+  const s = await customerStats(env.DB, 'm1', '2026-10-01', '2026-10-31');
+  assert.deepEqual([s.active, s.fresh, s.returning], [2, 1, 1]);   // a عائد (أول شراء في سبتمبر)، b جديد
+  assert.equal(await customerTotal(env.DB, 'm1'), 2);
+  await env.DB.prepare('DELETE FROM cust_first').run();
+  await initCustFirst(env.DB, 'm1');
+  assert.equal(await customerTotal(env.DB, 'm1'), 2);
+  assert.equal((await customerStats(env.DB, 'm1', '2026-09-01', '2026-09-30')).fresh, 1);
 });
