@@ -2,7 +2,7 @@
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCustDays, setDbHook, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCustDays, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
 const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
@@ -200,7 +200,8 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     // 3) إعادة مزامنة آخر 30 يوماً كل ساعة (لالتقاط تغيّر الحالات)، ثم 4) استكمال الأرشيف التاريخي
     const hour = Math.floor(now / 3600e3);
     // كل ساعة: إعادة مزامنة آخر 7 أيام (الحالات تتغير غالباً خلالها)؛ وكل 12 ساعة: 30 يوماً كاملة
-    if (state.lastResyncHour !== hour) {
+    // لا نقطع إعادة مزامنة جارية (كان هذا يترك فجوة بين نافذة الـ7 أيام والأرشيف)
+    if (state.lastResyncHour !== hour && !state.resyncNext) {
       const first = state.lastResyncHour === undefined;
       state.lastResyncHour = hour; state.resyncNext = addDays(today, -2);
       const deep = first || now - (state.deepAt || 0) > 12 * 3600e3;   // أول مرة: 30 يوماً
@@ -213,12 +214,18 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     if (state.resyncNext && ctx.used < ctx.budget && ready) {
       const r = await chunk(ctx, state, state.resyncNext, resyncLow);
       state.resyncNext = r.done ? null : r.ptr; log.push('resync');
-    } else if (!state.backfillDone && ctx.used < ctx.budget && ready) {
-      state.backfillNext = state.backfillNext || addDays(today, -31);
-      if (state.backfillNext < floor) state.backfillDone = true;
+    } else if (ready && ctx.used < ctx.budget && (!state.backfillDone || state.lastGapHour !== hour)) {
+      // الأرشيف بالاكتشاف لا بالمؤشر: نملأ أحدث مقطع أيام مفقودة (أي يوم بلا صف)، فلا تبقى فجوات مهما انقطعت المزامنة
+      ctx.used++;   // قراءة D1
+      const have = new Set(await loadedDays(db, merchant, floor, today));
+      let hi = null;
+      for (let d = today; d >= floor; d = addDays(d, -1)) if (!have.has(d)) { hi = d; break; }
+      if (!hi) { state.backfillDone = true; state.backfillNext = null; state.lastGapHour = hour; }
       else {
-        const r = await chunk(ctx, state, state.backfillNext, floor);
-        state.backfillNext = r.ptr; if (r.done) state.backfillDone = true; log.push('backfill');
+        let lo = hi;
+        while (lo > floor && !have.has(addDays(lo, -1))) lo = addDays(lo, -1);
+        state.backfillDone = false; state.backfillNext = hi;
+        await chunk(ctx, state, hi, lo); log.push('backfill');
       }
     }
 

@@ -145,3 +145,20 @@ test('customers: distinct buyers, new vs returning, from orders', async () => {
   assert.equal(s.total, 3);
   assert.equal(s.fresh + s.returning, s.active);
 });
+
+test('gaps are detected and healed (e.g. an abandoned resync leaves missing days)', async () => {
+  clearPriceCache();
+  const env = setup({ BACKFILL_DAYS: '20', SYNC_BUDGET: '40' });
+  const get = fakeSalla({ perDay: 5 });
+  let t = NOW;
+  for (let i = 0; i < 60; i++, t += 60000) if ((await syncMerchant(env, 'm1', { get }, t)).backfillDone) break;
+  const all = async () => (await rangeRows(env.DB, 'm1', addDays(TODAY, -20), TODAY)).length;
+  assert.equal(await all(), 21);
+  await env.DB.prepare('DELETE FROM day_agg WHERE merchant = ? AND day BETWEEN ? AND ?').bind('m1', addDays(TODAY, -14), addDays(TODAY, -9)).run();
+  assert.equal(await all(), 15);
+  const { setMeta } = await import('../src/db.js');
+  const st = await getMeta(env.DB, 'm1', 'state', {});
+  await setMeta(env.DB, 'm1', 'state', { ...st, lastGapHour: -1 });
+  for (let i = 0; i < 30; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  assert.equal(await all(), 21);
+});

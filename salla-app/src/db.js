@@ -49,6 +49,11 @@ export async function rangeRows(db, m, from, to) {
   return results.map((r) => JSON.parse(r.data));
 }
 
+// الأيام المخزّنة فعلاً (حتى الأيام بلا طلبات تُكتب صفاً فارغاً) لاكتشاف الفجوات
+export async function loadedDays(db, m, from, to) {
+  const { results } = await db.prepare('SELECT day FROM day_agg WHERE merchant = ? AND day BETWEEN ? AND ?').bind(m, from, to).all();
+  return results.map((r) => r.day);
+}
 export async function coverage(db, m) {
   const r = await db.prepare('SELECT MIN(day) AS oldest, MAX(day) AS newest FROM day_agg WHERE merchant = ?').bind(m).first();
   return { oldest: r?.oldest || null, newest: r?.newest || null };
