@@ -213,7 +213,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
       catch (e) { state.catError = String(e.message || e).slice(0, 120); state.catTries = (state.catTries || 0) + 1; }
       log.push('catalog');
     };
-    if (catDue && !state.catDoneOnce) await catRun(Math.floor((ctx.budget - ctx.used) / 2));
+    if (catDue) await catRun(Math.floor((ctx.budget - ctx.used) / 2));   // أولوية مبكرة (نصف الميزانية) حتى لا يتأخر تحديث الكتالوج خلف الأرشيف
     const ready = (!invOn || state.invDoneOnce || (state.invTries || 0) >= 15) && (!catOn || state.catDoneOnce || (state.catTries || 0) >= 15);
 
     if (ready && !state.dateMode && (state.probeTries || 0) < 6) { try { await probeDateMode(ctx, state, today); } catch (e) { state.probeError = String(e.message || e).slice(0, 100); } ctx.dateExact = state.dateMode === 'exact'; if (state.dateMode) log.push('probe:' + state.dateMode); }
@@ -265,7 +265,6 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
 
     // 5) تحديث المخزون الدوري إن بقيت ميزانية
-    if (catDue && state.catDoneOnce && ctx.used < ctx.budget) await catRun();
     if (invOn && state.invDoneOnce && ctx.used < ctx.budget && ((state.invNextAt || 0) <= now || (state.invPage || 1) > 1)) {
       await invOk();
     }

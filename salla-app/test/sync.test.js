@@ -182,3 +182,18 @@ test('heavy single day (many pages) completes in exact mode within the budget', 
   assert.ok(done, 'backfill finishes despite heavy days');
   assert.equal((await rangeRows(env.DB, 'm1', addDays(TODAY, -6), TODAY)).length, 7);
 });
+
+test('catalog refresh (e.g. new category data) is not starved by a running archive backfill', async () => {
+  clearPriceCache();
+  const env = setup({ CATALOG_SYNC: 'on', INVENTORY_SYNC: 'off', BACKFILL_DAYS: '40' });
+  const get = fakeSalla({ perDay: 40 });
+  let t = NOW;
+  for (let i = 0; i < 6; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  const { setMeta, readCatalog: rc } = await import('../src/db.js');
+  await env.DB.prepare('DELETE FROM catalog WHERE merchant = ?').bind('m1').run();
+  const st = await getMeta(env.DB, 'm1', 'state', {});
+  assert.equal(st.backfillDone, false);                           // الأرشيف ما زال يعمل
+  await setMeta(env.DB, 'm1', 'state', { ...st, catVer: 1 });      // نسخة قديمة => تحديث للكتالوج مطلوب
+  for (let i = 0; i < 3; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  assert.ok((await rc(env.DB, 'm1')).length >= 2, 'catalog refreshed while backfill is still running');
+});
