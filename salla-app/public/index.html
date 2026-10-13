@@ -600,7 +600,7 @@ function aggregate(from, to){
   const revSum = Object.values(prodMap).reduce((x,m)=>x+m.total,0) || 1;
   const products = Object.values(prodMap).sort((x,y)=>y.qty-x.qty).map(m => ({...m, share:m.total/revSum*100}));
   return {
-    list, revenue,
+    list, revenue, productSales: Object.values(prodMap).reduce((x,m)=>x+m.total,0),
     pay: bucket(o => o.pay), city: bucket(o => o.city), src: bucket(o => o.src),
     hours, dow, products, productsCount: products.length, top: products.slice(0,5), lostDetail,
     campaigns: (() => {
@@ -647,8 +647,8 @@ function deltaHTML(cur, prev, invert){
   const arrow = up ? '<path d="M12 19V5M5 12l7-7 7 7"/>' : '<path d="M12 5v14M19 12l-7 7-7-7"/>';
   return `<span class="delta ${good?'up':'down'}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${arrow}</svg>${Math.abs(pct).toFixed(1)}%</span>`;
 }
-// متوسط سعر القطعة = إجمالي المبيعات ÷ إجمالي القطع المباعة
-const unitAvg = c => c.sold ? c.revenue / c.sold : 0;
+// متوسط سعر القطعة = قيمة المنتجات المباعة (كمية × سعر الكتالوج، بدون الشحن والضريبة) ÷ إجمالي القطع المباعة
+const unitAvg = c => c.sold ? (c.productSales||0) / c.sold : 0;
 function renderKpis(cur, prev){
   const items = [
     {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)},
@@ -658,7 +658,7 @@ function renderKpis(cur, prev){
       sub:`قيمة مفقودة: ${money(cur.lostDetail ? cur.lostDetail.canceled.value : cur.lostValue)} ${CURRENCY}`},
     {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)},
     {k:'unit', lbl:'متوسط سعر القطعة', val:money(unitAvg(cur)), unit:CURRENCY, d:deltaHTML(unitAvg(cur), unitAvg(prev)),
-      sub:`${money(cur.revenue)} ${CURRENCY} ÷ ${fmt(cur.sold)} قطعة`}
+      sub:`${money(cur.productSales||0)} ${CURRENCY} ÷ ${fmt(cur.sold)} قطعة · بدون الشحن والضريبة`}
   ];
   $('#kpis').innerHTML = items.map(i => `
     <article class="card kpi ${i.cls||''}">
@@ -1298,7 +1298,7 @@ function exportReport(){
   const days = Math.round((v.to - v.from)/DAY) + 1;
   const lab = (map,k) => (map && map[k]) || (k==='unknown' ? 'غير محدد' : k);
   const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
-    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['متوسط سعر القطعة ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
+    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['مبيعات المنتجات بدون الشحن والضريبة ('+CURRENCY+')', c.productSales, p ? p.productSales : null, 3], ['متوسط سعر القطعة بدون الشحن والضريبة ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
   const sheets = [];
   sheets.push({name:'الملخص', widths:[34,18,18,14], rows:[
     [{v:'تقرير المبيعات', s:2}], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)} (${days} يوم)`], ['تاريخ التصدير', new Date().toLocaleString('en-GB')], [],

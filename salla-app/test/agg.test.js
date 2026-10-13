@@ -42,3 +42,15 @@ test('cancelled/refunded breakdown: counts, values, rate, products, payment, cit
   const old = emptyDay('2026-10-06'); delete old.lost; old.orders = 1; old.canceled = 1;
   assert.equal(sumDays([old]).lostDetail.canceled.count, 1);
 });
+
+test('sumDays: productSales = product lines only (no shipping/tax) and drives unit price', async () => {
+  const { emptyDay, addOrder, roundDay, sumDays } = await import('../src/agg.js');
+  const d = emptyDay('2026-10-10');
+  addOrder(d, { status: 'completed', total: 150, paymentMethod: 'mada', city: 'x', source: 's', hour: 10, qty: 3, customerId: 1,
+    lines: [{ name: 'A', qty: 2, price: 40, img: '' }, { name: 'B', qty: 1, price: 50, img: '' }] });   // 130 منتجات + 20 شحن/ضريبة
+  const s = sumDays([roundDay(d)]);
+  assert.equal(s.revenue, 150);
+  assert.equal(s.productSales, 130);
+  assert.equal(s.sold, 3);
+  assert.equal(sumDays([roundDay(d)], false).productSales, 130);   // الفترة السابقة (بلا تفاصيل) تحمل القيمة أيضاً
+});
