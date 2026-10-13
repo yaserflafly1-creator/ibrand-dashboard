@@ -695,7 +695,11 @@ function renderTrend(cur, from, to){
   const g = ctx.createLinearGradient(0,0,0,300);
   g.addColorStop(0,'rgba(236,72,153,.32)'); g.addColorStop(1,'rgba(236,72,153,0)');
   const few = s.labels.length<=40;
-  const data = {labels:s.labels, datasets:[{
+  // الإجماليات الشهرية/السنوية (أو نقطة/نقطتان فقط) تُعرض أعمدة؛ والخط للاتجاه اليومي
+  const type = (state.gran!=='day' || s.labels.length<=2) ? 'bar' : 'line';
+  const data = {labels:s.labels, datasets:[type==='bar' ? {
+    label:'المبيعات', data:s.rev, backgroundColor:'#ec4899', hoverBackgroundColor:'#db2777', borderRadius:10, maxBarThickness:64
+  } : {
     label:'المبيعات', data:s.rev, borderColor:'#ec4899', backgroundColor:g, fill:true, tension:.38, borderWidth:2.5,
     pointRadius:few?3.5:0, pointHoverRadius:6, pointBackgroundColor:'#fff', pointBorderColor:'#ec4899', pointBorderWidth:2
   }]};
@@ -712,8 +716,9 @@ function renderTrend(cur, from, to){
       y:{beginAtZero:true, border:{display:false}, grid:{color:'#f6e9ef'}, ticks:{maxTicksLimit:5, color:'#8b7480', font:{family:'IBM Plex Sans Arabic', size:11}, callback:v=>v>=1000?(v/1000)+'K':v}}
     }
   };
+  if(trendChart && trendChart.config.type!==type){ trendChart.destroy(); trendChart = null; }
   if(trendChart){ trendChart.data = data; trendChart.options = opts; trendChart.update(); }
-  else trendChart = new Chart(ctx, {type:'line', data, options:opts});
+  else trendChart = new Chart(ctx, {type, data, options:opts});
   document.querySelectorAll('#gran button').forEach(b => b.classList.toggle('on', b.dataset.g===state.gran));
 }
 
