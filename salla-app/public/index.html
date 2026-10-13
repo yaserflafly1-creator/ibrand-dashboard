@@ -2,6 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/png" href="logo.png">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>لوحة المبيعات | iBrand</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,6 +34,8 @@ button{cursor:pointer}
 /* Header */
 .top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
 .brand{display:flex;align-items:center;gap:12px}
+.brand-logo{height:58px;width:auto;display:block;flex:none}
+@media(max-width:640px){.brand-logo{height:46px}.top .avatar{display:none}}
 .logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,var(--pink-400),var(--pink-600));display:grid;place-items:center;color:#fff;box-shadow:0 8px 20px rgba(219,39,119,.28)}
 .brand h1{font-size:1.25rem;font-weight:700;letter-spacing:-.2px}
 .brand p{font-size:.82rem;color:var(--muted)}
@@ -226,9 +229,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
   <!-- Header -->
   <header class="top">
     <div class="brand">
-      <div class="logo" aria-hidden="true">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
-      </div>
+      <img class="brand-logo" src="logo.png" alt="آي براند — iBrand" width="154" height="58">
       <div>
         <h1>لوحة المبيعات</h1>
         <p id="greet">نظرة شاملة على أداء متجرك</p>
