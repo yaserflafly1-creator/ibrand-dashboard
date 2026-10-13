@@ -10,6 +10,7 @@ export async function ensureSchema(db) {
     // طلب واحد لكل صف: يُملأ من قائمة الطلبات، ثم تُكمَّل بيانات الحملة (att=1) من تفاصيل الطلب
     db.prepare("CREATE TABLE IF NOT EXISTS order_attr (merchant TEXT NOT NULL, id TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, total REAL NOT NULL, att INTEGER NOT NULL DEFAULT 0, src TEXT NOT NULL DEFAULT '', med TEXT NOT NULL DEFAULT '', camp TEXT NOT NULL DEFAULT '', PRIMARY KEY (merchant, id))"),
     db.prepare('CREATE TABLE IF NOT EXISTS prices (merchant TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL, img TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (merchant, name))'),
+    db.prepare("CREATE TABLE IF NOT EXISTS catalog (merchant TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL, img TEXT NOT NULL DEFAULT '', cat TEXT NOT NULL DEFAULT '', PRIMARY KEY (merchant, name))"),
     db.prepare('CREATE TABLE IF NOT EXISTS cust_day (merchant TEXT NOT NULL, cid TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (merchant, cid, day))'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_cust_day ON cust_day (merchant, day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_pending ON order_attr (merchant, att, day)'),
@@ -75,6 +76,15 @@ export async function customerStats(db, m, from, to) {
   ]);
   const total = t?.c || 0, active = r?.c || 0, fresh = n?.c || 0;
   return { total, active, fresh, returning: Math.max(0, active - fresh) };
+}
+
+/* كتالوج المنتجات (اسم -> سعر + صورة + تصنيف) من قائمة المنتجات؛ دفعة واحدة لكل صفحة */
+export const upsertCatalog = (db, m, map) => multiInsert(db, 'INSERT INTO catalog (merchant, name, price, img, cat)',
+  'ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img, cat = excluded.cat',
+  [...map].map(([name, v]) => [m, name, v.price, v.img || '', v.cat || '']), 5);
+export async function readCatalog(db, m) {
+  const { results } = await db.prepare('SELECT name, price, img, cat FROM catalog WHERE merchant = ?').bind(m).all();
+  return results;
 }
 
 /* كتالوج الأسعار (اسم المنتج -> سعر الوحدة الحالي) من قائمة المنتجات */

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeD1, makeKV, fakeSalla } from './helpers.js';
 import { syncMerchant, addDays, clearPriceCache } from '../src/sync.js';
-import { ensureSchema, rangeRows, coverage, getMeta, readInventory, campaignStats, readPrices } from '../src/db.js';
+import { ensureSchema, rangeRows, coverage, getMeta, readInventory, campaignStats, readCatalog } from '../src/db.js';
 
 const NOW = Date.parse('2026-10-12T09:00:00Z');   // 12:00 الرياض
 const TODAY = '2026-10-12';
@@ -117,7 +117,7 @@ test('catalog prices (inventory off): orders are priced by product name, sale pr
   const get = fakeSalla({ perDay: 4 });
   const r = await syncMerchant(env, 'm1', { get }, NOW);
   assert.equal(r.log[0], 'catalog');
-  assert.deepEqual((await readPrices(env.DB, 'm1')).map((x) => [x.name, x.price]).sort(), [['dress', 70], ['shoe', 60]]);
+  assert.deepEqual((await readCatalog(env.DB, 'm1')).map((x) => [x.name, x.price, x.cat]).sort(), [['dress', 70, 'فساتين'], ['shoe', 60, 'أحذية']]);
   const rows = await rangeRows(env.DB, 'm1', TODAY, TODAY);
   assert.equal(rows[0].prod.Dress[1], 210);   // 3 × سعر العرض 70، لا تقدير الإجمالي
   const st = await getMeta(env.DB, 'm1', 'state', {});

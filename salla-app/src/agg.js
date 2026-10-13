@@ -64,6 +64,22 @@ const toList = (map) => Object.entries(map).map(([k, [orders, total]]) => ({ k, 
 const MAX_PRODUCTS = 200;
 
 // rows: ملخصات يومية. detail=false يعيد الأرقام الرئيسية فقط (للفترة السابقة).
+// المبيعات حسب التصنيف من الأيام المخزّنة: كل منتج في d.prod يُنسب لتصنيفه عبر catMap (اسم بحروف صغيرة -> تصنيف)
+export function categoryStats(rows, catMap) {
+  const cats = {};
+  const prods = {};
+  for (const d of rows) for (const k in d.prod) { const e = prods[k] || (prods[k] = [0, 0]); e[0] += d.prod[k][0]; e[1] += d.prod[k][1]; }
+  let total = 0, units = 0;
+  for (const [name, [qty, val]] of Object.entries(prods)) {
+    const cat = (catMap && catMap.get(String(name).trim().toLowerCase())) || '';
+    const c = cats[cat] || (cats[cat] = { name: cat, qty: 0, total: 0, products: 0 });
+    c.qty += qty; c.total += val; c.products++; total += val; units += qty;
+  }
+  const list = Object.values(cats).map((c) => ({ ...c, total: r2(c.total), avg: c.qty ? r2(c.total / c.qty) : 0,
+    share: total ? (c.total / total) * 100 : 0, unitShare: units ? (c.qty / units) * 100 : 0 })).sort((x, y) => y.total - x.total);
+  return { list, total: r2(total), units };
+}
+
 export function sumDays(rows, detail = true) {
   const a = { orders: 0, valid: 0, revenue: 0, productSales: 0, sold: 0, lostValue: 0, counts: { completed: 0, shipping: 0, canceled: 0, refunded: 0 } };
   const pay = {}, city = {}, src = {}, prod = {};

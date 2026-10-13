@@ -2,7 +2,7 @@
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCustDays, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
 const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
@@ -17,7 +17,8 @@ export async function priceMap(db, merchant) {
   const hit = priceCache.get(merchant);
   if (hit && hit.exp > Date.now()) return hit.map;
   const map = new Map();
-  for (const r of await readPrices(db, merchant)) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img });
+  for (const r of await readCatalog(db, merchant)) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img, cat: r.cat });
+  for (const r of await readPrices(db, merchant)) if (r.price > 0 && !map.has(r.name)) map.set(r.name, { price: r.price, img: r.img, cat: '' });
   for (const it of await readInventory(db, merchant)) {
     const key = String(it.name).trim().toLowerCase();
     if (it.price > 0 && !map.has(key)) map.set(key, { price: it.price, img: it.img });
@@ -139,7 +140,7 @@ async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
   const cap = Math.min(ctx.budget, ctx.used + maxCalls);
   while (ctx.used < cap) {
     const j = await ctx.get('/products', { format: 'light', page, per_page: 30 });
-    await upsertPrices(ctx.db, ctx.merchant, buildPriceMap(j.data));
+    await upsertCatalog(ctx.db, ctx.merchant, buildPriceMap(j.data));
     if (page >= (j.pagination?.totalPages ?? 1)) {
       state.catPage = 1; state.catDoneOnce = true; state.catNextAt = now + 6 * 3600e3;
       clearPriceCache(); ctx.prices = await priceMap(ctx.db, ctx.merchant);
@@ -205,6 +206,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     };
     if (invOn && !state.invDoneOnce && invDue) await invOk(Math.floor(ctx.budget / 2));
     // بعد ١٥ محاولة متعثرة نكمل الطلبات دون أسعار المنتجات بدل أن تتوقف اللوحة
+    if (state.catVer !== 2) { state.catVer = 2; state.catNextAt = 0; state.catPage = 1; }   // 2: الكتالوج يحمل التصنيف => تحديث واحد فوري دون إيقاف الطلبات
     const catDue = catOn && (!state.catDoneOnce || (state.catNextAt || 0) <= now || (state.catPage || 1) > 1);
     const catRun = async (cap) => {
       try { await catalogChunk(ctx, state, now, cap); state.catError = ''; }

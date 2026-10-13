@@ -57,6 +57,19 @@ button{cursor:pointer}
 .range[hidden]{display:none}
 #rangeBtn{cursor:pointer;font-weight:600}
 #cnlKind{display:none}
+.cat-tbl td{white-space:nowrap}
+.cat-tbl .share{display:flex;align-items:center;gap:8px}
+.cat-tbl .share i{display:block;flex:none;height:8px;border-radius:99px;background:linear-gradient(90deg,var(--pink-400),var(--pink-600));min-width:3px}
+.cat-tbl .share b{font-size:.8rem;min-width:44px}
+.cat-tbl tfoot td{font-weight:700;border-top:2px solid var(--border);background:var(--pink-50)}
+@media(max-width:640px){
+  .cat-tbl{min-width:0!important;width:100%}
+  .cat-tbl th:nth-child(n+4),.cat-tbl td:nth-child(n+4){display:none}   /* على الجوال: التصنيف + المبيعات + النسبة */
+  .cat-tbl th:nth-child(3){width:auto!important}
+  .cat-tbl th,.cat-tbl td{padding:10px 6px}
+  .cat-tbl td:first-child{white-space:normal}
+  .cat-tbl .share i{max-width:46px!important}
+}
 .cal-dlg{max-width:680px}
 .cal-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
 .cal-top button{background:var(--pink-50);border:1px solid var(--border);border-radius:999px;padding:6px 14px;cursor:pointer}
@@ -374,6 +387,19 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <button class="linkbtn more" id="prodMore" type="button" hidden>عرض الكل</button>
   </section>
 
+  <section class="card panel sec" id="catPanel">
+    <div class="panel-h"><div><h2>المبيعات حسب التصنيف</h2><p id="catSub">نسبة تأثير كل تصنيف على المبيعات</p></div></div>
+    <div class="tbl-wrap">
+      <table class="cat-tbl" style="min-width:560px">
+        <thead><tr><th>التصنيف</th><th>المبيعات</th><th style="width:34%">نسبة التأثير</th><th>القطع</th><th class="c-avg">متوسط سعر القطعة</th><th>التغيّر</th></tr></thead>
+        <tbody id="catRows"></tbody>
+        <tfoot id="catFoot"></tfoot>
+      </table>
+    </div>
+    <button class="linkbtn more" id="catMore" type="button" hidden>عرض الكل</button>
+    <p class="period-note" id="catNote" style="margin:10px 0 0"></p>
+  </section>
+
   <section class="card panel sec" id="invPanel">
     <div class="panel-h">
       <div><h2>المخزون</h2><p id="invCount">جارٍ التحميل…</p></div>
@@ -485,6 +511,7 @@ const DEMO_PRODUCTS = [
   {n:'وشاح حرير', i:'🧣', p:159}
 ];
 const PRODUCTS = DEMO_PRODUCTS.slice();
+const DEMO_CAT = {'عطر الورد الفاخر':'العطور والعناية','كريم عناية بالبشرة':'العطور والعناية','حقيبة يد جلدية':'الحقائب والإكسسوارات','نظارة شمسية':'الحقائب والإكسسوارات','وشاح حرير':'الحقائب والإكسسوارات','ساعة ذكية برو':'الإلكترونيات','سماعات لاسلكية':'الإلكترونيات','حذاء رياضي خفيف':'الأحذية'};
 const WEIGHTS = [16,10,6,13,9,22,8,16];
 const NAMES = ['سارة العتيبي','محمد القحطاني','نورة الدوسري','عبدالله الشمري','ريم الحربي','فهد المطيري','لينا الزهراني','خالد السبيعي','هند الغامدي','يوسف العنزي','أمل الشهري','تركي البقمي','جود المالكي','سلطان العمري','دانة الراشد','ماجد الحازمي'];
 const FIRST = ['سارة','محمد','نورة','عبدالله','ريم','فهد','لينا','خالد','هند','يوسف','أمل','تركي'];
@@ -601,6 +628,11 @@ function aggregate(from, to){
   const products = Object.values(prodMap).sort((x,y)=>y.qty-x.qty).map(m => ({...m, share:m.total/revSum*100}));
   return {
     list, revenue, productSales: Object.values(prodMap).reduce((x,m)=>x+m.total,0),
+    categories: (() => {
+      const cm = {}; let tot = 0, un = 0;
+      Object.values(prodMap).forEach(m => { const n = DEMO_CAT[m.name] || '', c = cm[n] || (cm[n] = {name:n, qty:0, total:0, products:0}); c.qty += m.qty; c.total += m.total; c.products++; tot += m.total; un += m.qty; });
+      return {total:tot, units:un, mapped:true, list:Object.values(cm).map(c => ({...c, avg:c.qty?c.total/c.qty:0, share:tot?c.total/tot*100:0, prevTotal:0})).sort((a,b)=>b.total-a.total)};
+    })(),
     pay: bucket(o => o.pay), city: bucket(o => o.city), src: bucket(o => o.src),
     hours, dow, products, productsCount: products.length, top: products.slice(0,5), lostDetail,
     campaigns: (() => {
@@ -815,6 +847,30 @@ $('#prodSearch').addEventListener('input', renderProducts);
 $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProducts(); });
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
+let catAll = false;
+function renderCategories(cur){
+  const C = cur.categories, panel = $('#catPanel'); if(!panel) return;
+  if(!C || !C.list || !C.list.length){ panel.hidden = false; $('#catRows').innerHTML = '<tr><td colspan="6" class="empty">لا توجد مبيعات في هذه الفترة</td></tr>'; $('#catFoot').innerHTML = ''; $('#catMore').hidden = true; return; }
+  panel.hidden = false;
+  const max = Math.max(...C.list.map(c => c.share)) || 1;
+  const rows = catAll ? C.list : C.list.slice(0, 12);
+  const lbl = n => n || 'غير مصنّف';
+  $('#catRows').innerHTML = rows.map(c => {
+    const d = c.prevTotal ? ((c.total - c.prevTotal)/c.prevTotal*100) : null;
+    const dh = d===null ? '<span class="sub">—</span>' : `<span class="delta ${d>=0?'up':'down'}" style="font-size:.78rem;font-weight:700;color:${d>=0?'#16a34a':'#e11d48'}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}%</span>`;
+    return `<tr><td><b>${esc(lbl(c.name))}</b><div class="sub">${fmt(c.products)} منتج</div></td><td><b>${money(c.total)}</b> ${CURRENCY}</td>
+      <td><div class="share"><i style="width:${Math.max(3, Math.round(c.share/max*150))}px"></i><b>${c.share.toFixed(1)}%</b></div></td>
+      <td>${fmt(c.qty)}</td><td class="c-avg">${money(c.avg)} ${CURRENCY}</td><td>${dh}</td></tr>`;
+  }).join('');
+  const avg = C.units ? C.total / C.units : 0;
+  $('#catFoot').innerHTML = `<tr><td>الإجمالي</td><td>${money(C.total)} ${CURRENCY}</td><td>100%</td><td>${fmt(C.units)}</td><td class="c-avg">${money(avg)} ${CURRENCY}</td><td></td></tr>`;
+  $('#catSub').textContent = `${fmt(C.list.length)} تصنيف · مبيعات المنتجات بدون الشحن والضريبة`;
+  $('#catMore').hidden = C.list.length <= 12; $('#catMore').textContent = catAll ? 'عرض أقل' : `عرض الكل (${fmt(C.list.length)})`;
+  const un = C.list.find(c => !c.name);
+  $('#catNote').textContent = LIVE && !C.mapped ? 'تصنيفات المنتجات قيد التحميل من سلة…' : (un && un.share > 5 ? `${un.share.toFixed(1)}% من المبيعات لمنتجات بلا تصنيف في سلة` : '');
+}
+document.addEventListener('click', e => { if(e.target.closest('#catMore')){ catAll = !catAll; if(state.view) renderCategories(state.view.cur); } });
+
 function renderTop(cur){
   const max = cur.top.length ? cur.top[0].qty : 1;
   $('#top').innerHTML = cur.top.length ? cur.top.map((p,i) => {
@@ -945,7 +1001,7 @@ async function update(){
       const [s, r] = await Promise.all([api(`/api/summary?from=${ymd(from)}&to=${ymd(to)}`), SHARE ? {orders:[]} : api('/api/recent')]);
       if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
       const ip = document.getElementById('invPanel'); if(ip) ip.hidden = !!s.sync.inventoryOff;
-      cur = s.cur; cur.series = s.series; cur.campaigns = s.campaigns; prev = s.prev; syncInfo = s.sync;
+      cur = s.cur; cur.series = s.series; cur.campaigns = s.campaigns; cur.categories = s.categories; prev = s.prev; syncInfo = s.sync;
       CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
       PRODUCTS.length = 0; const idx = {};
       currentList = r.orders.map(o => mapOrder(o, idx));
@@ -962,6 +1018,7 @@ async function update(){
   renderStatus(cur);
   renderOrders();
   renderTop(cur);
+  renderCategories(cur);
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur, prev};
@@ -1310,6 +1367,9 @@ function exportReport(){
   sheets.push({name:'يومي', widths:[14,12,16,12,16], rows:[H(['اليوم','الطلبات','المبيعات','ملغي (عدد)','ملغي (قيمة)']),
     ...(c.series||[]).map(r => [r[0], I(r[1]), M(r[2]), I(r[3]), M(r[4])])]});
   sheets.push({name:'المنتجات', widths:[56,12,16,10], rows:[H(['المنتج','الكمية','المبيعات','الحصة']), ...(c.products||[]).map(x => [x.name, I(x.qty), M(x.total), P(x.share)])]});
+  if(c.categories && c.categories.list.length) sheets.push({name:'التصنيفات', widths:[34,16,12,12,18,16,12], rows:[H(['التصنيف','المبيعات','نسبة التأثير','القطع','متوسط سعر القطعة','الفترة السابقة','التغيّر']),
+    ...c.categories.list.map(x => [x.name || 'غير مصنّف', M(x.total), P(x.share), I(x.qty), M(x.avg), M(x.prevTotal), x.prevTotal ? chg(x.total, x.prevTotal) : '—']),
+    ['الإجمالي', M(c.categories.total), P(100), I(c.categories.units), M(c.categories.units ? c.categories.total/c.categories.units : 0), '', '']]});
   const lost = k => { const L = c.lostDetail && c.lostDetail[k]; if(!L) return []; const t = k==='canceled' ? 'الملغية' : 'المسترجعة';
     return [[{v:'الطلبات '+t, s:2}], H(['عدد الطلبات','القيمة','النسبة من الطلبات','متوسط القيمة']), [I(L.count), M(L.value), P(L.rate), M(L.avg)], [],
       H(['أكثر المنتجات '+(k==='canceled'?'إلغاءً':'استرجاعاً'),'الكمية','القيمة']), ...L.products.map(x => [x.name, I(x.qty), M(x.total)]), [],

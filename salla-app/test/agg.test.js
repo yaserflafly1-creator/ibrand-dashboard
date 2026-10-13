@@ -54,3 +54,14 @@ test('sumDays: productSales = product lines only (no shipping/tax) and drives un
   assert.equal(s.sold, 3);
   assert.equal(sumDays([roundDay(d)], false).productSales, 130);   // الفترة السابقة (بلا تفاصيل) تحمل القيمة أيضاً
 });
+
+test('categoryStats: sales/units/share per category, uncategorized bucket, ordered by sales', async () => {
+  const { categoryStats } = await import('../src/agg.js');
+  const d = emptyDay('2026-10-10');
+  addOrder(d, { status: 'completed', total: 400, paymentMethod: 'mada', city: 'x', source: 's', hour: 10, qty: 6, customerId: 1,
+    lines: [{ name: 'Dress ', qty: 2, price: 100, img: '' }, { name: 'Shoe', qty: 1, price: 100, img: '' }, { name: 'Mystery', qty: 3, price: 33.33, img: '' }] });
+  const r = categoryStats([roundDay(d)], new Map([['dress', 'فساتين'], ['shoe', 'أحذية']]));
+  assert.deepEqual(r.list.map((c) => [c.name, c.qty, c.total]), [['فساتين', 2, 200], ['أحذية', 1, 100], ['', 3, 99.99]]);
+  assert.equal(Math.round(r.list[0].share), 50);
+  assert.equal(r.units, 6);
+});

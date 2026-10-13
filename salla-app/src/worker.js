@@ -1,6 +1,6 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
-import { sumDays, seriesOf } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats } from './db.js';
+import { sumDays, seriesOf, categoryStats } from './agg.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, readCatalog } from './db.js';
 import { syncMerchant, priceMap, priceLines, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
@@ -202,8 +202,14 @@ async function handleSummary(req, env) {
   const cov = await coverage(env.DB, ctx.merchant);
   const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
   campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
+  // التصنيفات: من أيام المنتجات المخزّنة + تصنيف كل منتج من الكتالوج؛ والمقارنة بالفترة السابقة
+  const catMap = await memo(`catmap:${ctx.merchant}`, 300e3, async () => new Map((await readCatalog(env.DB, ctx.merchant)).filter((r) => r.cat).map((r) => [r.name, r.cat])));
+  const catCur = categoryStats(curRows, catMap), catPrev = categoryStats(prevRows, catMap);
+  const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
+  const categories = { total: catCur.total, units: catCur.units, mapped: catMap.size > 0,
+    list: catCur.list.map((c) => ({ ...c, prevTotal: prevByName.get(c.name) ?? 0 })) };
   return json({
-    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns,
+    cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns, categories,
     currency: state.currency || 'SAR',
     sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, dateMode: state.dateMode || '',
       stage: (env.CATALOG_SYNC !== 'off' && !state.catDoneOnce) ? 'catalog' : state.resyncNext ? 'resync' : state.backfillDone ? 'done' : 'backfill',

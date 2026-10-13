@@ -50,7 +50,7 @@ export function fakeSalla({ perDay = 4, inclusive = true, firstDay = '2000-01-01
     }
     if (path === '/products') {
       const page = Number(params.page || 1);
-      return { data: [{ id: page, name: page === 1 ? 'Dress' : 'Shoe', price: { amount: page === 1 ? 80 : 60 }, sale_price: { amount: page === 1 ? 70 : 0 }, thumbnail: 't.png' }], pagination: { totalPages: 2 } };
+      return { data: [{ id: page, name: page === 1 ? 'Dress' : 'Shoe', price: { amount: page === 1 ? 80 : 60 }, sale_price: { amount: page === 1 ? 70 : 0 }, thumbnail: 't.png', category: { name: page === 1 ? 'فساتين' : 'أحذية', url: 'u' } }], pagination: { totalPages: 2 } };
     }
     throw new Error('unexpected ' + path);
   };
