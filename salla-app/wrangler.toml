@@ -32,6 +32,7 @@ BACKFILL_DAYS = "400"
 CAMPAIGN_DAYS = "90"
 # 40 مناسبة للخطة المجانية (حد 50 نداءً خارجياً لكل تشغيل)، وارفعها إلى 900 في الخطة المدفوعة
 SYNC_BUDGET = "40"
+INVENTORY_SYNC = "off"
 SALLA_APP_ID = "1866862647"
 
 # الأسرار (لا تُكتب هنا): npx wrangler secret put SALLA_CLIENT_ID

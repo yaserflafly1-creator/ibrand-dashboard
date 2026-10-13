@@ -31,6 +31,12 @@ export function priceLines(order, map) {
     const hit = map.get(String(l.name).trim().toLowerCase());
     if (hit) { l.price = hit.price; l.img = l.img || hit.img; }
   }
+  // بلا كتالوج أسعار (المخزون متوقف): نقدّر سعر الوحدة بتوزيع إجمالي الطلب على الكميات حتى لا تظهر قيم المنتجات صفراً
+  const unpriced = order.lines.filter((l) => !l.price);
+  if (unpriced.length && order.total > 0) {
+    const qty = order.lines.reduce((s, l) => s + (l.qty || 0), 0) || 1;
+    for (const l of unpriced) l.price = Math.round((order.total / qty) * 100) / 100;
+  }
 }
 
 /* يجلب طلبات الأيام [a..b] ويكتب ملخصاتها. يرجع { ok, pages }؛ ok=false إن تجاوز الميزانية قبل الاكتمال (لا يُكتب شيء). */
@@ -130,6 +136,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); }
   state.invGen = state.invGen || 1;
   const log = [];
+  const invOn = env.INVENTORY_SYNC !== 'off';
 
   try {
     // 1) المخزون أولاً حتى تكتمل أول دورة (نحتاجه لأسعار المنتجات)، ثم كل ساعة
@@ -140,9 +147,9 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
       catch (e) { state.invError = String(e.message || e).slice(0, 120); state.invTries = (state.invTries || 0) + 1; }
       log.push('inventory');
     };
-    if (!state.invDoneOnce && invDue) await invOk(Math.floor(ctx.budget / 2));
+    if (invOn && !state.invDoneOnce && invDue) await invOk(Math.floor(ctx.budget / 2));
     // بعد ١٥ محاولة متعثرة نكمل الطلبات دون أسعار المنتجات بدل أن تتوقف اللوحة
-    const ready = state.invDoneOnce || (state.invTries || 0) >= 15;
+    const ready = !invOn || state.invDoneOnce || (state.invTries || 0) >= 15;
 
     // 2) أحدث يومين: كل ~5 دقائق
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {
@@ -174,7 +181,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
 
     // 5) تحديث المخزون الدوري إن بقيت ميزانية
-    if (state.invDoneOnce && ctx.used < ctx.budget && ((state.invNextAt || 0) <= now || (state.invPage || 1) > 1)) {
+    if (invOn && state.invDoneOnce && ctx.used < ctx.budget && ((state.invNextAt || 0) <= now || (state.invPage || 1) > 1)) {
       await invOk();
     }
     if (ctx.currency) state.currency = ctx.currency;

@@ -873,8 +873,8 @@ function renderSyncInfo(from){
   const parts = [];
   if(!syncInfo.backfillDone) parts.push(`جارٍ تحميل تاريخ المتجر من سلة${syncInfo.oldest?` (وصلنا إلى ${syncInfo.oldest})`:''}`);
   if(syncInfo.oldest && ymd(from) < syncInfo.oldest) parts.push('بعض أيام هذه الفترة لم تُحمَّل بعد فالأرقام جزئية');
-  if(!syncInfo.inventoryReady) parts.push('جارٍ تجهيز المخزون وأسعار المنتجات');
-  if(syncInfo.error) parts.push('تنبيه المزامنة: '+syncInfo.error);
+  if(!syncInfo.inventoryReady && !syncInfo.inventoryOff) parts.push('جارٍ تجهيز المخزون وأسعار المنتجات');
+  if(syncInfo.error && !(syncInfo.inventoryOff && /quantities/.test(syncInfo.error))) parts.push('تنبيه المزامنة: '+syncInfo.error);
   el.textContent = parts.join(' · ');
 }
 
@@ -889,6 +889,7 @@ async function update(){
     try{
       const [s, r] = await Promise.all([api(`/api/summary?from=${ymd(from)}&to=${ymd(to)}`), SHARE ? {orders:[]} : api('/api/recent')]);
       if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
+      const ip = document.getElementById('invPanel'); if(ip) ip.hidden = !!s.sync.inventoryOff;
       cur = s.cur; cur.series = s.series; cur.campaigns = s.campaigns; prev = s.prev; syncInfo = s.sync;
       CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
       PRODUCTS.length = 0; const idx = {};
