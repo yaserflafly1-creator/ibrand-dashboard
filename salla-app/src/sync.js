@@ -2,10 +2,10 @@
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCustDays, setDbHook, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
-const SCHEMA = 4;   // 4: أسعار الأصناف من كتالوج المنتجات (تُعاد مزامنة الأرشيف مرة واحدة)
+const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
 export const CAMPAIGN_DAYS_DEFAULT = 90;
 export const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 export const riyadhDay = (ms) => new Date(ms + 3 * 3600e3).toISOString().slice(0, 10);
@@ -47,9 +47,10 @@ async function syncOrdersRange(ctx, a, b) {
   const days = new Map();
   for (let d = a; d <= b; d = addDays(d, 1)) days.set(d, emptyDay(d));
   let pages = 0;
-  const attrRows = [];
+  const attrRows = [], custRows = [];
   for (let page = 1; ; page++) {
-    if (ctx.used >= ctx.budget) return { ok: false, pages };
+    // نحجز نداءات D1 النهائية (الأيام + الطلبات + العملاء ≈ 3-5 دفعات) كي لا نتجاوز حد النداءات الفرعية
+    if (ctx.used + 6 >= ctx.budget) return { ok: false, pages };
     const j = await ctx.get('/orders', { from_date: from, to_date: to, per_page: 30, page });
     pages++;
     for (const raw of j.data || []) {
@@ -58,12 +59,14 @@ async function syncOrdersRange(ctx, a, b) {
       priceLines(o, ctx.prices);
       if (o.currency) ctx.currency = o.currency;
       addOrder(days.get(o.day), o);
+      if (o.customerId != null && (o.status === 'completed' || o.status === 'shipping')) custRows.push([o.customerId, o.day]);
       if (o.day >= ctx.attrFloor && o.sallaId != null) attrRows.push({ id: o.sallaId, day: o.day, status: o.status, total: o.total });
     }
     if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
   await upsertDays(ctx.db, ctx.merchant, [...days.values()].map(roundDay));
   if (attrRows.length) await upsertOrderRows(ctx.db, ctx.merchant, attrRows);
+  if (custRows.length) await upsertCustDays(ctx.db, ctx.merchant, custRows);
   return { ok: true, pages };
 }
 
@@ -88,10 +91,12 @@ async function attributionChunk(ctx, limit) {
 /* دفعة أيام للخلف من المؤشر ptr حتى الحد lower. تضبط حجم الدفعة حسب متوسط الصفحات لكل يوم. */
 async function chunk(ctx, state, ptr, lower) {
   const left = ctx.budget - ctx.used;
-  const n = Math.max(1, Math.min(30, Math.floor((left - 1) / (state.ppd * 1.25 + 0.5))));
+  const n = Math.max(1, Math.min(30, Math.floor((left - 7) / (state.ppd * 1.25 + 0.5))));   // نترك 6 نداءات لكتابات D1
   const start = addDays(ptr, -(n - 1)) < lower ? lower : addDays(ptr, -(n - 1));
   const span = daysBetween(start, ptr);
-  const r = await syncOrdersRange(ctx, start, ptr);
+  let r;
+  try { r = await syncOrdersRange(ctx, start, ptr); }
+  catch (e) { state.ppd = Math.min(state.ppd * 2, 60); throw e; }   // تجاوز حد النداءات: نصغّر الدفعة التالية
   if (!r.ok) { state.ppd = Math.min(state.ppd * 1.5, 60); return { ptr, done: false }; }
   state.ppd = Math.max(0.4, state.ppd * 0.5 + (r.pages / (span + 2)) * 0.5);
   return { ptr: addDays(start, -1), done: start <= lower };
@@ -144,6 +149,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const ctx = { ...ctxBase, db, merchant, used: 0, budget: Number(env.SYNC_BUDGET) || 40, currency: state.currency };
   const get = ctxBase.get;
   ctx.get = async (path, params) => { ctx.used++; return get(path, params); };
+  setDbHook(() => { ctx.used++; });
   ctx.prices = await priceMap(db, merchant);
 
   const today = riyadhDay(now);
@@ -151,7 +157,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const floor = addDays(today, -(Number(env.BACKFILL_DAYS) || 400));
   state.ppd = state.ppd || 5;
   // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
-  if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); }
+  if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); state.resyncLow = addDays(today, -30); state.deepAt = now; }
   state.invGen = state.invGen || 1;
   const log = [];
   const invOn = env.INVENTORY_SYNC !== 'off', catOn = env.CATALOG_SYNC !== 'off';
@@ -184,14 +190,24 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
 
     // 2b) بيانات الحملات للطلبات الجديدة (ثلث الميزانية المتبقية كحد أقصى كي لا تتأخر بقية المزامنة)
     if (ready && ctx.used < ctx.budget) {
-      const n = await attributionChunk(ctx, Math.floor((ctx.budget - ctx.used) / 3));
+      // أثناء تحميل الأرشيف نترك للطلبات الحصة الأكبر (الحملات تكتمل لاحقاً)
+      const share = state.backfillDone ? Math.floor((ctx.budget - ctx.used) / 3) : Math.min(4, Math.floor((ctx.budget - ctx.used) / 6));
+      const n = await attributionChunk(ctx, share);
       if (n) log.push('attribution');
     }
 
     // 3) إعادة مزامنة آخر 30 يوماً كل ساعة (لالتقاط تغيّر الحالات)، ثم 4) استكمال الأرشيف التاريخي
     const hour = Math.floor(now / 3600e3);
-    if (state.lastResyncHour !== hour) { state.lastResyncHour = hour; state.resyncNext = addDays(today, -2); }
-    const resyncLow = addDays(today, -30) < floor ? floor : addDays(today, -30);
+    // كل ساعة: إعادة مزامنة آخر 7 أيام (الحالات تتغير غالباً خلالها)؛ وكل 12 ساعة: 30 يوماً كاملة
+    if (state.lastResyncHour !== hour) {
+      const first = state.lastResyncHour === undefined;
+      state.lastResyncHour = hour; state.resyncNext = addDays(today, -2);
+      const deep = first || now - (state.deepAt || 0) > 12 * 3600e3;   // أول مرة: 30 يوماً
+      if (deep) state.deepAt = now;
+      state.resyncLow = addDays(today, deep ? -30 : -7);
+    }
+    const lowWanted = state.resyncLow || addDays(today, -30);
+    const resyncLow = lowWanted < floor ? floor : lowWanted;
     if (state.resyncNext && state.resyncNext < resyncLow) state.resyncNext = null;
     if (state.resyncNext && ctx.used < ctx.budget && ready) {
       const r = await chunk(ctx, state, state.resyncNext, resyncLow);
@@ -217,6 +233,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     state.lastError = String(e.message || e).slice(0, 160); state.lastErrorAt = now;
     throw e;
   } finally {
+    setDbHook(null);
     state.lockUntil = 0;
     await setMeta(db, merchant, 'state', state);
   }

@@ -89,7 +89,7 @@ test('schema bump restarts the backfill once', async () => {
   await setMeta(env.DB, 'm1', 'state', { ...st, schema: 1 });          // محاكاة صفوف بالشكل القديم
   await syncMerchant(env, 'm1', { get }, NOW + 13 * 60000);
   st = await getMeta(env.DB, 'm1', 'state', {});
-  assert.equal(st.schema, 4);
+  assert.equal(st.schema, 5);
   assert.ok(st.backfillDone === false || st.backfillNext !== null || st.resyncNext, 'backfill restarted');
 });
 
@@ -132,4 +132,16 @@ test('catalog failure does not stall orders', async () => {
   const r = await syncMerchant(env, 'm1', { get }, NOW);
   assert.ok(r.log.includes('recent'));
   assert.match((await getMeta(env.DB, 'm1', 'state', {})).catError, /422/);
+});
+
+test('customers: distinct buyers, new vs returning, from orders', async () => {
+  clearPriceCache();
+  const env = setup({ BACKFILL_DAYS: '3' });
+  const base = fakeSalla({ perDay: 4 });          // العملاء 0..3 كل يوم؛ 0 ملغي دائماً
+  await syncMerchant(env, 'm1', { get: base }, NOW);
+  const { customerStats } = await import('../src/db.js');
+  const s = await customerStats(env.DB, 'm1', addDays(TODAY, -1), TODAY);
+  assert.equal(s.active, 3);                      // ١..٣ (٠ ملغي لا يُحسب)
+  assert.equal(s.total, 3);
+  assert.equal(s.fresh + s.returning, s.active);
 });

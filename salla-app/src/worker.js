@@ -1,6 +1,6 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
 import { sumDays, seriesOf } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats } from './db.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats } from './db.js';
 import { syncMerchant, priceMap, priceLines, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
@@ -274,20 +274,14 @@ async function handleCoupons(req, env) {
 
 /* ---------- /api/customers: إجمالي المسجلين + المسجلون في فترة (صلاحية customers.read) ---------- */
 async function handleCustomers(req, env) {
-  const ctx = await authContext(req, env);
+  const ctx = await dataContext(req, env);
   if (ctx.res) return ctx.res;
   const q = new URL(req.url).searchParams;
   if (!validRange(q)) return json({ error: 'bad range' }, 400);
   const from = q.get('from'), to = q.get('to');
-  const body = await memo(`cust:${ctx.merchant}:${from}:${to}`, 300e3, async () => {
-    // [VERIFY] قسم pagination في هذه النقطة موصوف cursor-based في الوثيقة؛ نقرأ total إن وُجد وإلا null
-    const [all, ranged] = await Promise.all([
-      ctx.get('/customers', { page: 1 }),
-      ctx.get('/customers', { page: 1, date_from: from, date_to: to })
-    ]);
-    return { total: all.pagination?.total ?? null, inRange: ranged.pagination?.total ?? null };
-  });
-  return json(body);
+  // واجهة /customers في سلة بلا إجمالي (ترقيم cursor)، فالعملاء يُحسبون من الطلبات المحمّلة في D1
+  await ensureSchema(env.DB);
+  return json(await customerStats(env.DB, ctx.merchant, from, to));
 }
 
 /* ---------- Cron: المزامنة لكل تاجر مثبّت ---------- */

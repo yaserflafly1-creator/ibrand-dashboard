@@ -344,10 +344,12 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
       <div class="chart-box" style="height:260px"><canvas id="timeChart" dir="ltr"></canvas></div>
     </div>
     <div class="card panel">
-      <div class="panel-h"><div><h2>العملاء</h2><p>من سجلات العملاء في المتجر</p></div></div>
-      <div class="mini-kpis">
-        <div class="mini"><b id="custTotal">—</b><span>إجمالي العملاء المسجلين</span></div>
-        <div class="mini"><b id="custInRange">—</b><span>سجّلوا في هذه الفترة</span></div>
+      <div class="panel-h"><div><h2>العملاء</h2><p id="custNote">من الطلبات المكتملة وقيد التنفيذ</p></div></div>
+      <div class="mini-kpis" style="grid-template-columns:repeat(2,1fr)">
+        <div class="mini"><b id="custInRange">—</b><span>عملاء اشتروا في الفترة</span></div>
+        <div class="mini"><b id="custNew">—</b><span>عملاء جدد (أول شراء)</span></div>
+        <div class="mini"><b id="custRet">—</b><span>عملاء عائدون</span></div>
+        <div class="mini"><b id="custTotal">—</b><span>إجمالي العملاء</span></div>
       </div>
     </div>
   </section>
@@ -1030,14 +1032,20 @@ function renderCoupons(){
 let custSeq = 0;
 async function loadCustomerStats(from, to, cur){
   const seq = ++custSeq;
-  let total = null, inRange = null;
+  let total = null, inRange = null, fresh = null, ret = null;
   try{
-    if(LIVE){ const j = await api(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`); total = j.total; inRange = j.inRange; }
-    else { total = new Set(ORDERS.map(o => o.cid)).size; inRange = new Set(cur.list.map(o => o.cid)).size; }
+    if(LIVE){ const j = await api(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`); total = j.total; inRange = j.active; fresh = j.fresh; ret = j.returning; }
+    else {
+      const first = {}; ORDERS.filter(VALID).forEach(o => { if(!(o.cid in first) || o.ts<first[o.cid]) first[o.cid] = o.ts; });
+      const mine = cur.list.filter(VALID), act = new Set(mine.map(o => o.cid));
+      total = Object.keys(first).length; inRange = act.size; fresh = [...act].filter(c => first[c]>=from.getTime()).length; ret = inRange - fresh;
+    }
   } catch(e){ if(e.status===401) return; }
   if(seq!==custSeq) return;
   $('#custTotal').textContent = total===null ? '—' : fmt(total);
   $('#custInRange').textContent = inRange===null ? '—' : fmt(inRange);
+  $('#custNew').textContent = fresh===null ? '—' : fmt(fresh);
+  $('#custRet').textContent = ret===null ? '—' : fmt(ret);
 }
 
 /* ============ Shipments (GET /shipments) ============ */

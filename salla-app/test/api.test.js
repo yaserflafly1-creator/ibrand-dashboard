@@ -87,13 +87,12 @@ test('inventory: served from D1; coupons/customers/shipments from Salla', async 
   await setMeta(env.DB, '346539387', 'state', { invDoneOnce: true, invUpdatedAt: 123 });
   const calls = mockFetch(good, {
     '/coupons': () => ok([{ id: 1, code: 'A', type: 'fixed', status: 'active', amount: { amount: 10 } }, { id: 2, code: 'B', status: 'deleted', amount: { amount: 5 } }], { totalPages: 1 }),
-    '/customers': (u) => ok([], u.includes('date_from') ? { total: 7 } : { total: 120 }),
     '/shipments': () => ok([{ id: 's1', courier_name: 'SMSA', status: 'delivered' }, { id: 's2', courier_name: 'SMSA', status: 'lost' }], { totalPages: 1 })
   });
   const inv = await (await get(env, '/api/inventory')).json();
   assert.deepEqual([inv.items.length, inv.complete, inv.updatedAt], [1, true, 123]);
   assert.deepEqual((await (await get(env, '/api/coupons')).json()).coupons.map((c) => c.code), ['A']);
-  assert.deepEqual(await (await get(env, '/api/customers?from=2026-10-01&to=2026-10-31')).json(), { total: 120, inRange: 7 });
+  assert.deepEqual(await (await get(env, '/api/customers?from=2026-10-01&to=2026-10-31')).json(), { total: 0, active: 0, fresh: 0, returning: 0 });   // العملاء من جدول cust_day، لا من سلة
   assert.equal((await get(env, '/api/customers?from=1&to=2')).status, 400);
   const sh = await (await get(env, '/api/shipments')).json();
   assert.deepEqual(sh.shipments.map((s) => [s.courier, s.group]), [['SMSA', 'delivered'], ['SMSA', 'failed']]);
