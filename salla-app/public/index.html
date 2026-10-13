@@ -237,6 +237,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
 
     <span class="spacer"></span>
+    <button class="btn" id="shareBtn" type="button" hidden>مشاركة</button>
     <button class="btn btn-primary" id="export">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
       تصدير التقرير
@@ -429,6 +430,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
   </section>
 
+  <dialog id="shareDlg"><div class="dlg" id="shareDlgBody"></div></dialog>
   <dialog id="orderDlg"><div class="dlg" id="orderDlgBody"></div></dialog>
 
   <footer>داخل سلة تُعرض بيانات متجرك الحقيقية وتُحدَّث تلقائياً؛ وخارجها (أو بـ ?demo) تُعرض بيانات تجريبية</footer>
@@ -826,11 +828,13 @@ function renderCampaigns(cur){
 /* ============ Live data (Salla Worker) ============ */
 // داخل سلة: الصفحة تُفتح بـ ?token=... ويجلب الـ Worker الطلبات الحقيقية. بدون ذلك (أو ?demo) تُستخدم بيانات تجريبية.
 const QS = new URLSearchParams(location.search);
-const LIVE = location.protocol!=='file:' && !QS.has('demo') && !!QS.get('token');
+const SHARE = /^[0-9a-f]{32}$/.test(QS.get('share')||'') ? QS.get('share') : '';   // رابط مشاركة للقراءة فقط
+const LIVE = location.protocol!=='file:' && !QS.has('demo') && (!!QS.get('token') || !!SHARE);
 const CUR_SYMBOL = {SAR:'ر.س', USD:'$', AED:'د.إ', KWD:'د.ك', QAR:'ر.ق', BHD:'د.ب', OMR:'ر.ع', EGP:'ج.م'};
 let liveSeq = 0, syncInfo = null;
-async function api(path){
-  const res = await fetch(path, {headers:{authorization:'Bearer '+QS.get('token')}});
+async function api(path, opt){
+  const o = opt || {};
+  const res = await fetch(path, {...o, headers:{...(o.headers||{}), authorization: SHARE ? 'Share '+SHARE : 'Bearer '+QS.get('token')}});
   if(!res.ok){ const err = new Error('HTTP '+res.status); err.status = res.status; throw err; }
   return res.json();
 }
@@ -851,6 +855,9 @@ function signalReady(){ if(SDK && !readySent){ readySent = true; try{ SDK.ready(
 
 // انتهاء جلسة التطبيق المضمَّن: نطلب من سلة إعادة تحميل الإطار بتوكن جديد (embedded.auth.refresh)
 // مع حارس يمنع الحلقة إن بقي التوكن غير صالح لسبب آخر.
+function shareExpired(){
+  document.querySelector('.wrap, main, body').innerHTML = '<div style="text-align:center;padding:80px 20px;font-family:inherit"><h2>انتهت صلاحية رابط المشاركة</h2><p>اطلب رابطاً جديداً من صاحب المتجر.</p></div>';
+}
 function sessionExpired(){
   let last = 0;
   try{ last = Number(sessionStorage.getItem('sallaRefreshAt')) || 0; }catch(e){}
@@ -879,13 +886,13 @@ async function update(){
   let cur, prev;
   if(LIVE){
     try{
-      const [s, r] = await Promise.all([api(`/api/summary?from=${ymd(from)}&to=${ymd(to)}`), api('/api/recent')]);
+      const [s, r] = await Promise.all([api(`/api/summary?from=${ymd(from)}&to=${ymd(to)}`), SHARE ? {orders:[]} : api('/api/recent')]);
       if(seq!==liveSeq) return; // تم اختيار فترة أحدث أثناء التحميل
       cur = s.cur; cur.series = s.series; cur.campaigns = s.campaigns; prev = s.prev; syncInfo = s.sync;
       CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
       PRODUCTS.length = 0; const idx = {};
       currentList = r.orders.map(o => mapOrder(o, idx));
-    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); signalReady(); return; }
+    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return SHARE ? shareExpired() : sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); signalReady(); return; }
   } else {
     cur = aggregate(from, to); prev = aggregate(pFrom, pTo); currentList = cur.list; syncInfo = null;
   }
@@ -901,7 +908,7 @@ async function update(){
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur};
-  loadCustomerStats(from, to, cur);
+  if(!SHARE) loadCustomerStats(from, to, cur);
   renderTime(cur);
   renderCancel(cur, from, to);
   state.view = {from, to, cur};
@@ -1123,11 +1130,42 @@ $('#export').addEventListener('click', () => {
   boot();
 })();
 
+/* ---- روابط المشاركة (للقراءة فقط) ---- */
+async function shareList(){
+  const body = $('#shareDlgBody');
+  let list = [];
+  try{ list = (await api('/api/share')).shares; }catch(e){ body.innerHTML = '<p>تعذّر تحميل الروابط</p>'; return; }
+  body.innerHTML = `<h2 style="margin-bottom:6px">مشاركة اللوحة</h2>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:12px">رابط للقراءة فقط: يعرض الأرقام والرسوم والمنتجات والمخزون، بدون أسماء العملاء والطلبات. من يملك الرابط يراها دون حساب سلة، فشاركه بحذر.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <input id="shLabel" placeholder="لمن الرابط؟ (اختياري)" style="flex:1;min-width:140px;padding:8px;border:1px solid var(--line);border-radius:10px">
+      <select id="shDays" style="padding:8px;border-radius:10px;border:1px solid var(--line)"><option value="1">يوم</option><option value="7" selected>7 أيام</option><option value="30">30 يوماً</option><option value="90">90 يوماً</option></select>
+      <button class="btn btn-primary" id="shNew" type="button">إنشاء رابط</button>
+    </div>
+    <div id="shList">${list.length ? list.map(x => `<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;font-size:.82rem">
+        <div><b>${esc(x.label||'بدون اسم')}</b> · ينتهي ${new Date(x.exp).toLocaleDateString('ar-SA')}</div>
+        <input readonly value="${esc(x.url)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid var(--line);border-radius:8px" onclick="this.select()">
+        <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button></div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
+    <button class="btn" id="shClose" type="button" style="margin-top:8px">إغلاق</button>`;
+  $('#shNew').onclick = async () => { try{ await api('/api/share', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({label:$('#shLabel').value, days:Number($('#shDays').value)})}); }catch(e){ toast('تعذّر إنشاء الرابط'); } shareList(); };
+  $('#shClose').onclick = () => $('#shareDlg').close();
+  body.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy).then(() => toast('تم نسخ الرابط'), () => toast('انسخه يدوياً')); });
+  body.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try{ await api('/api/share?id='+b.dataset.del, {method:'DELETE'}); }catch(e){} shareList(); });
+}
+document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ $('#shareDlg').showModal(); shareList(); } });
+
 async function boot(){
-  if(LIVE && SDK){
+  if(LIVE && SDK && !SHARE){
     try{ await Promise.race([SDK.init(), new Promise((_,rej) => setTimeout(() => rej(new Error('sdk init timeout')), 5000))]); }
     catch(e){ console.error('SDK init failed', e); }
   }
+  if(SHARE){   // عرض للقراءة فقط: بلا أسماء عملاء/طلبات/كوبونات/شحن
+    ['cpnPanel','shpPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
+    const ob = document.getElementById('orders'); const op = ob && ob.closest('.card'); if(op) op.hidden = true;
+    const ex = document.getElementById('export'); if(ex) ex.hidden = true;
+    setPreset('month'); loadInventory(); scheduleAuto(); return;
+  }
+  const sb = document.getElementById('shareBtn'); if(sb && LIVE) sb.hidden = false;
   setPreset('month');
   loadInventory();
   loadCoupons();

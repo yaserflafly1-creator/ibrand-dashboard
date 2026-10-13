@@ -134,3 +134,24 @@ test('summary includes campaign stats from stored order attribution', async () =
   assert.deepEqual([c.attributed, c.total], [2, 3]);                                                            // طلب الشحن بلا إسناد بعد
   assert.ok(c.since);
 });
+
+test('share links: create/list/revoke with embedded token; read-only summary via Share; expiry; no minting', async () => {
+  const env = mkEnv(); mockFetch(good);
+  await seedDay(env, '2026-10-10', [{ t: 100 }]);
+  const call = (path, init = {}, hdr = auth.headers) => worker.fetch(new Request('https://x.test' + path, { ...init, headers: { ...hdr, ...(init.headers || {}) } }), env);
+  const c = await (await call('/api/share', { method: 'POST', body: JSON.stringify({ label: 'شريك', days: 7 }) })).json();
+  assert.match(c.id, /^[0-9a-f]{32}$/); assert.ok(c.url.endsWith('/?share=' + c.id));
+  const sh = { authorization: 'Share ' + c.id };
+  const s = await call('/api/summary?from=2026-10-10&to=2026-10-10', {}, sh);
+  assert.equal(s.status, 200); assert.equal((await s.json()).cur.revenue, 100);
+  assert.equal((await call('/api/inventory', {}, sh)).status, 200);
+  assert.equal((await call('/api/recent', {}, sh)).status, 401);                    // الطلبات بأسماء العملاء: توكن سلة فقط
+  assert.equal((await call('/api/share', { method: 'POST', body: '{}' }, sh)).status, 401); // الرابط لا يُنشئ روابط
+  assert.equal((await (await call('/api/share')).json()).shares.length, 1);
+  assert.equal((await call('/api/summary?from=2026-10-10&to=2026-10-10', {}, { authorization: 'Share ' + '0'.repeat(32) })).status, 401);
+  await call('/api/share?id=' + c.id, { method: 'DELETE' });
+  assert.equal((await call('/api/summary?from=2026-10-10&to=2026-10-10', {}, sh)).status, 401);
+  const c2 = await (await call('/api/share', { method: 'POST', body: '{}' })).json();
+  env.TOKENS.m.set('share:' + c2.id, JSON.stringify({ merchant: '346539387', exp: Date.now() - 1 }));
+  assert.equal((await call('/api/summary?from=2026-10-10&to=2026-10-10', {}, { authorization: 'Share ' + c2.id })).status, 401);
+});

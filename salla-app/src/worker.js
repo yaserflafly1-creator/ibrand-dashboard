@@ -61,6 +61,7 @@ const loadTokens = async (env, merchant) => JSON.parse((await env.TOKENS.get(`me
 
 /* ---------- هوية التاجر من توكن التطبيق المضمَّن (Token Introspect) ---------- */
 async function merchantFromEmbeddedToken(req, env) {
+  if ((req.headers.get('authorization') || '').startsWith('Share ')) return null;
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || new URL(req.url).searchParams.get('token');
   if (!token || !env.SALLA_APP_ID) return null;
   const cached = memoStore.get('tok:' + token);
@@ -130,9 +131,56 @@ async function authContext(req, env) {
   return { merchant, get: makeClient(env, merchant, tokens) };
 }
 
+/* ---------- روابط المشاركة (قراءة فقط): share:<id> → { merchant, label, exp } في KV ---------- */
+const SHARE_MAX_DAYS = 90, SHARE_ID_RE = /^[0-9a-f]{32}$/;
+async function shareFromRequest(req, env) {
+  const m = /^Share ([0-9a-f]{32})$/.exec(req.headers.get('authorization') || '');
+  if (!m) return null;
+  const raw = await env.TOKENS.get(`share:${m[1]}`);
+  if (!raw) return null;
+  const rec = JSON.parse(raw);
+  return rec.exp > Date.now() ? rec : null;
+}
+// نقاط تقرأ من D1 فقط (ملخص/مخزون): تقبل توكن سلة أو رابط مشاركة؛ الباقي (طلبات/عملاء بأسمائهم) توكن سلة فقط
+async function dataContext(req, env) {
+  if ((req.headers.get('authorization') || '').startsWith('Share ')) {
+    const rec = await shareFromRequest(req, env);
+    return rec ? { merchant: rec.merchant, shared: true } : { res: json({ error: 'unauthorized' }, 401) };
+  }
+  return authContext(req, env);
+}
+async function handleShare(req, env) {
+  const merchant = await merchantFromEmbeddedToken(req, env);
+  if (!merchant) return json({ error: 'unauthorized' }, 401);
+  const origin = new URL(req.url).origin;
+  if (req.method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    const days = Math.min(SHARE_MAX_DAYS, Math.max(1, Math.floor(Number(b.days)) || 7));
+    const id = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const rec = { merchant, label: String(b.label || '').slice(0, 60), exp: Date.now() + days * 864e5, created: Date.now() };
+    await env.TOKENS.put(`share:${id}`, JSON.stringify(rec), { expirationTtl: days * 86400 + 3600 });
+    return json({ id, url: `${origin}/?share=${id}`, ...rec });
+  }
+  if (req.method === 'DELETE') {
+    const id = new URL(req.url).searchParams.get('id') || '';
+    if (!SHARE_ID_RE.test(id)) return json({ error: 'bad id' }, 400);
+    const raw = await env.TOKENS.get(`share:${id}`);
+    if (raw && JSON.parse(raw).merchant === merchant) await env.TOKENS.delete(`share:${id}`);
+    return json({ ok: true });
+  }
+  const { keys } = await env.TOKENS.list({ prefix: 'share:' });
+  const out = [];
+  for (const k of keys) {
+    const raw = await env.TOKENS.get(k.name);
+    const rec = raw && JSON.parse(raw);
+    if (rec && rec.merchant === merchant && rec.exp > Date.now()) { const id = k.name.slice(6); out.push({ id, url: `${origin}/?share=${id}`, ...rec }); }
+  }
+  return json({ shares: out.sort((a, b) => b.created - a.created) });
+}
+
 /* ---------- /api/summary: أرقام الفترة والفترة السابقة من الملخصات اليومية ---------- */
 async function handleSummary(req, env) {
-  const ctx = await authContext(req, env);
+  const ctx = await dataContext(req, env);
   if (ctx.res) return ctx.res;
   const q = new URL(req.url).searchParams;
   if (!validRange(q)) return json({ error: 'bad range' }, 400);
@@ -173,7 +221,7 @@ async function handleRecent(req, env) {
 
 /* ---------- /api/inventory: من جدول D1 الذي تملؤه المزامنة ---------- */
 async function handleInventory(req, env) {
-  const ctx = await authContext(req, env);
+  const ctx = await dataContext(req, env);
   if (ctx.res) return ctx.res;
   await ensureSchema(env.DB);
   const state = await getMeta(env.DB, ctx.merchant, 'state', {});
@@ -255,6 +303,7 @@ export default {
     try {
       if (pathname === '/webhook' && req.method === 'POST') return await handleWebhook(req, env);
       if (pathname === '/api/summary' && req.method === 'GET') return await handleSummary(req, env);
+      if (pathname === '/api/share' && ['GET', 'POST', 'DELETE'].includes(req.method)) return await handleShare(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
       if (pathname === '/api/coupons' && req.method === 'GET') return await handleCoupons(req, env);
