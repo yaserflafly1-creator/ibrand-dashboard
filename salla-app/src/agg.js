@@ -65,13 +65,17 @@ const MAX_PRODUCTS = 200;
 
 // rows: ملخصات يومية. detail=false يعيد الأرقام الرئيسية فقط (للفترة السابقة).
 // المبيعات حسب التصنيف من الأيام المخزّنة: كل منتج في d.prod يُنسب لتصنيفه عبر catMap (اسم بحروف صغيرة -> تصنيف)
+// تطبيع اسم المنتج (trim + حروف صغيرة) مع ذاكرة: كان يُكرَّر لكل منتج في كل يوم فيستهلك المعالج
+const normCache = new Map();
+const norm = (n) => { let v = normCache.get(n); if (v === undefined) { v = String(n).trim().toLowerCase(); if (normCache.size > 30000) normCache.clear(); normCache.set(n, v); } return v; };
+
 export function categoryStats(rows, catMap, vatMap) {
   const cats = {};
   const prods = {};
   for (const d of rows) for (const k in d.prod) { const e = prods[k] || (prods[k] = [0, 0]); e[0] += d.prod[k][0]; e[1] += d.prod[k][1]; }
   let total = 0, units = 0;
   for (const [name, [qty, val0]] of Object.entries(prods)) {
-    const key = String(name).trim().toLowerCase();
+    const key = norm(name);
     const cat = (catMap && catMap.get(key)) || '';
     const val = val0 * ((vatMap && vatMap.get(key)) || 1);     // شامل الضريبة للمنتجات الخاضعة لها
     const c = cats[cat] || (cats[cat] = { name: cat, qty: 0, total: 0, products: 0 });
@@ -84,14 +88,13 @@ export function categoryStats(rows, catMap, vatMap) {
 
 export function sumDays(rows, detail = true, vatMap = null) {
   const a = { orders: 0, valid: 0, revenue: 0, productSales: 0, sold: 0, lostValue: 0, counts: { completed: 0, shipping: 0, canceled: 0, refunded: 0 } };
-  const pay = {}, city = {}, src = {}, prod = {};
+  const pay = {}, city = {}, src = {}, prod = {}, ptot = {};
   const hours = new Array(24).fill(0), dow = new Array(7).fill(0);
   const lostAcc = { canceled: { v: 0, pay: {}, city: {}, prod: {} }, refunded: { v: 0, pay: {}, city: {}, prod: {} } };
   for (const d of rows) {
     a.orders += d.orders; a.valid += d.valid; a.revenue += d.revenue; a.sold += d.units; a.lostValue += d.lostValue;
     for (const k of Object.keys(a.counts)) a.counts[k] += d[k] || 0;
-    for (const k in d.prod) a.productSales += d.prod[k][1] * ((vatMap && vatMap.get(String(k).trim().toLowerCase())) || 1);   // قيمة المنتجات (كمية × سعر الكتالوج) بلا شحن، شاملة الضريبة للمنتجات الخاضعة لها
-    if (!detail) continue;
+    if (!detail) { for (const k in d.prod) ptot[k] = (ptot[k] || 0) + d.prod[k][1]; continue; }
     for (const kind of ['canceled', 'refunded']) {   // صفوف قديمة بلا lost تُحسب أصفاراً
       const l = d.lost && d.lost[kind]; if (!l) continue;
       const acc = lostAcc[kind]; acc.v += l.v;
@@ -105,6 +108,12 @@ export function sumDays(rows, detail = true, vatMap = null) {
     dow[new Date(d.day + 'T00:00:00Z').getUTCDay()] += d.valid;
     for (const k in d.prod) { const e = prod[k] || (prod[k] = [0, 0, '']); e[0] += d.prod[k][0]; e[1] += d.prod[k][1]; if (!e[2]) e[2] = d.prod[k][2]; }
   }
+  // قيمة المنتجات (كمية × سعر الكتالوج) بلا شحن، شاملة الضريبة للمنتجات الخاضعة لها؛ عامل الضريبة مرة لكل منتج لا لكل يوم
+  const src2 = detail ? prod : null;
+  let ps = 0;
+  if (src2) for (const k in src2) ps += src2[k][1] * ((vatMap && vatMap.get(norm(k))) || 1);
+  else for (const k in ptot) ps += ptot[k] * ((vatMap && vatMap.get(norm(k))) || 1);
+  a.productSales = ps;
   a.revenue = r2(a.revenue); a.lostValue = r2(a.lostValue); a.productSales = r2(a.productSales);
   a.lost = a.counts.canceled + a.counts.refunded;
   a.aov = a.valid ? r2(a.revenue / a.valid) : 0;

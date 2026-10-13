@@ -9,7 +9,7 @@ async function memo(key, ttlMs, fn) {
   const hit = memoStore.get(key);
   if (hit && hit.exp > Date.now()) return hit.v;
   const v = await fn();
-  if (memoStore.size > 500) memoStore.clear();
+  if (memoStore.size > 120) memoStore.clear();   // ملخصات الفترات كبيرة نسبياً: نحدّ عدد المخزَّن
   memoStore.set(key, { v, exp: Date.now() + ttlMs });
   return v;
 }
@@ -195,29 +195,35 @@ async function handleSummary(req, env) {
   if (days > 800) return json({ error: 'range too long' }, 400);
   const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(days - 1));
 
-  await ensureSchema(env.DB);
-  const rows = await rangeRows(env.DB, ctx.merchant, prevFrom, to);
-  const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
-  const state = await getMeta(env.DB, ctx.merchant, 'state', {});
-  const cov = await coverage(env.DB, ctx.merchant);
-  const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
-  campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
-  // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
-  const cat = await memo(`catmap:${ctx.merchant}`, 300e3, async () => {
-    const rows2 = await readCatalog(env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
-    return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
+  // ذاكرة مؤقتة داخل الـ isolate للاستجابة (والمشاهدون والتحديث التلقائي يتشاركونها): الحساب ثقيل على معالج الخطة المجانية
+  const ttl = to < riyadhDay(Date.now()) ? 600e3 : 45e3;   // فترة منتهية: 10 دقائق؛ تشمل اليوم: 45 ثانية
+  const text = await memo(`summary:${ctx.merchant}:${from}:${to}`, ttl, async () => {
+    await ensureSchema(env.DB);
+    const rows = await rangeRows(env.DB, ctx.merchant, prevFrom, to);
+    const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
+    const state = await getMeta(env.DB, ctx.merchant, 'state', {});
+    const cov = await coverage(env.DB, ctx.merchant);
+    const campaigns = await campaignStats(env.DB, ctx.merchant, from, to);
+    campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
+    // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
+    const cat = await memo(`catmap:${ctx.merchant}`, 300e3, async () => {
+      const rows2 = await readCatalog(env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
+      return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
+    });
+    const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
+    const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
+    const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true,
+      list: catCur.list.map((c) => ({ ...c, prevTotal: prevByName.get(c.name) ?? 0 })) };
+    const out = {
+      cur: sumDays(curRows, true, cat.vat), prev: sumDays(prevRows, false, cat.vat), series: seriesOf(curRows), campaigns, categories,
+      currency: state.currency || 'SAR',
+      sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, dateMode: state.dateMode || '',
+        stage: (env.CATALOG_SYNC !== 'off' && !state.catDoneOnce) ? 'catalog' : state.resyncNext ? 'resync' : state.backfillDone ? 'done' : 'backfill',
+        catPage: state.catPage || 1, resyncNext: state.resyncNext || null, backfillNext: state.backfillNext || null, lastRunAt: state.lastRunAt || 0, lastLog: state.lastLog || [], lastUsed: state.lastUsed || 0, error: state.lastError || (env.INVENTORY_SYNC === 'off' ? '' : state.invError) || state.catError || '' }
+    };
+    return JSON.stringify(out);
   });
-  const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
-  const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
-  const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true,
-    list: catCur.list.map((c) => ({ ...c, prevTotal: prevByName.get(c.name) ?? 0 })) };
-  return json({
-    cur: sumDays(curRows, true, cat.vat), prev: sumDays(prevRows, false, cat.vat), series: seriesOf(curRows), campaigns, categories,
-    currency: state.currency || 'SAR',
-    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, dateMode: state.dateMode || '',
-      stage: (env.CATALOG_SYNC !== 'off' && !state.catDoneOnce) ? 'catalog' : state.resyncNext ? 'resync' : state.backfillDone ? 'done' : 'backfill',
-      catPage: state.catPage || 1, resyncNext: state.resyncNext || null, backfillNext: state.backfillNext || null, lastRunAt: state.lastRunAt || 0, lastLog: state.lastLog || [], lastUsed: state.lastUsed || 0, error: state.lastError || (env.INVENTORY_SYNC === 'off' ? '' : state.invError) || state.catError || '' }
-  });
+  return new Response(text, { headers: { 'content-type': 'application/json' } });
 }
 
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */

@@ -942,7 +942,7 @@ let liveSeq = 0, syncInfo = null;
 async function api(path, opt){
   const o = opt || {};
   const res = await fetch(path, {...o, headers:{...(o.headers||{}), authorization: SHARE ? 'Share '+SHARE : 'Bearer '+QS.get('token')}});
-  if(!res.ok){ const err = new Error('HTTP '+res.status); err.status = res.status; throw err; }
+  if(!res.ok){ const err = new Error('HTTP '+res.status); err.status = res.status; try{ const j = await res.clone().json(); err.detail = j.message || j.error || ''; }catch(e){} throw err; }
   return res.json();
 }
 // طلب من /api/recent إلى الشكل الذي تفهمه الجدول ونافذة التفاصيل
@@ -1005,7 +1005,7 @@ async function update(){
       CURRENCY = CUR_SYMBOL[s.currency] || s.currency || CURRENCY;
       PRODUCTS.length = 0; const idx = {};
       currentList = r.orders.map(o => mapOrder(o, idx));
-    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return SHARE ? shareExpired() : sessionExpired(); toast('تعذّر جلب بيانات المتجر من سلة'); signalReady(); return; }
+    } catch(e){ if(seq!==liveSeq) return; if(e.status===401) return SHARE ? shareExpired() : sessionExpired(); toast('تعذّر جلب بيانات المتجر ('+e.message+(e.detail?': '+String(e.detail).slice(0,80):'')+')'); signalReady(); return; }
   } else {
     cur = aggregate(from, to); prev = aggregate(pFrom, pTo); currentList = cur.list; syncInfo = null;
   }
