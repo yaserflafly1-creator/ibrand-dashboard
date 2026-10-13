@@ -87,7 +87,7 @@ button{cursor:pointer}
 
 /* Cards */
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
-.grid-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px}
+.grid-kpi{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:18px}
 .kpi{padding:18px;position:relative;overflow:hidden;transition:.25s;cursor:default}
 .kpi:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(219,39,119,.12);border-color:var(--pink-200)}
 .kpi .ico{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--pink-50);color:var(--pink-600);margin-bottom:14px}
@@ -202,7 +202,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (max-width:640px){.mini-kpis{grid-template-columns:1fr 1fr!important}}
 
 /* Responsive */
-@media (max-width:1180px){.grid-kpi{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:1380px){.grid-kpi{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:960px){.grid-charts,.grid-bottom{grid-template-columns:1fr}}
 @media (max-width:640px){#cmpPanel th,#cmpPanel td{padding:10px 6px;font-size:.78rem}#cmpRows td:nth-child(2){max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 @media (max-width:960px){.grid-charts[style]{grid-template-columns:1fr!important}}
@@ -552,7 +552,8 @@ const ICONS = {
   orders:'<path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/>',
   aov:'<path d="M3 3v18h18M7 14l4-4 3 3 5-6"/>',
   cancel:'<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>',
-  products:'<path d="M21 8l-9-5-9 5v8l9 5 9-5V8zM3.3 7.5L12 12.5l8.7-5M12 22V12.5"/>'
+  products:'<path d="M21 8l-9-5-9 5v8l9 5 9-5V8zM3.3 7.5L12 12.5l8.7-5M12 22V12.5"/>',
+  unit:'<path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01"/>'
 };
 const icon = k => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -646,6 +647,8 @@ function deltaHTML(cur, prev, invert){
   const arrow = up ? '<path d="M12 19V5M5 12l7-7 7 7"/>' : '<path d="M12 5v14M19 12l-7 7-7-7"/>';
   return `<span class="delta ${good?'up':'down'}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${arrow}</svg>${Math.abs(pct).toFixed(1)}%</span>`;
 }
+// متوسط سعر القطعة = إجمالي المبيعات ÷ إجمالي القطع المباعة
+const unitAvg = c => c.sold ? c.revenue / c.sold : 0;
 function renderKpis(cur, prev){
   const items = [
     {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)},
@@ -653,7 +656,9 @@ function renderKpis(cur, prev){
     {k:'aov', lbl:'متوسط قيمة الطلب', val:money(cur.aov), unit:CURRENCY, d:deltaHTML(cur.aov, prev.aov)},
     {k:'cancel', cls:'alert', lbl:'الطلبات الملغية', val:fmt(cur.counts.canceled), d:deltaHTML(cur.counts.canceled, prev.counts.canceled, true),
       sub:`قيمة مفقودة: ${money(cur.lostDetail ? cur.lostDetail.canceled.value : cur.lostValue)} ${CURRENCY}`},
-    {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)}
+    {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)},
+    {k:'unit', lbl:'متوسط سعر القطعة', val:money(unitAvg(cur)), unit:CURRENCY, d:deltaHTML(unitAvg(cur), unitAvg(prev)),
+      sub:`${money(cur.revenue)} ${CURRENCY} ÷ ${fmt(cur.sold)} قطعة`}
   ];
   $('#kpis').innerHTML = items.map(i => `
     <article class="card kpi ${i.cls||''}">
@@ -1293,7 +1298,7 @@ function exportReport(){
   const days = Math.round((v.to - v.from)/DAY) + 1;
   const lab = (map,k) => (map && map[k]) || (k==='unknown' ? 'غير محدد' : k);
   const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
-    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4]];
+    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['متوسط سعر القطعة ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
   const sheets = [];
   sheets.push({name:'الملخص', widths:[34,18,18,14], rows:[
     [{v:'تقرير المبيعات', s:2}], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)} (${days} يوم)`], ['تاريخ التصدير', new Date().toLocaleString('en-GB')], [],
