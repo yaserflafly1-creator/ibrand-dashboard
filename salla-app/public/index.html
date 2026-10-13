@@ -52,6 +52,28 @@ button{cursor:pointer}
 .range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 [hidden]{display:none!important}
 .range[hidden]{display:none}
+#rangeBtn{cursor:pointer;font-weight:600}
+.cal-dlg{max-width:680px}
+.cal-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.cal-top button{background:var(--pink-50);border:1px solid var(--border);border-radius:999px;padding:6px 14px;cursor:pointer}
+.cal-top button:disabled{opacity:.35;cursor:default}
+.cal-quick{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.cal-quick button{background:#fff;border:1px solid var(--border);border-radius:999px;padding:5px 12px;font-size:.82rem;cursor:pointer}
+.cal-quick button:hover{background:var(--pink-50);border-color:var(--pink-300)}
+.cal-months{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cal-m h4{text-align:center;margin-bottom:8px;font-size:.95rem}
+.cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:2px 0;text-align:center}
+.cal-g i{font-style:normal;font-size:.8rem;padding:7px 0;border-radius:10px}
+.cal-g .wd{color:var(--muted);font-size:.72rem}
+.cal-g .d{cursor:pointer;user-select:none}
+.cal-g .d:hover{background:var(--pink-100)}
+.cal-g .d.in{background:var(--pink-100);border-radius:0}
+.cal-g .d.s{background:var(--pink-600);color:#fff;font-weight:700;border-radius:10px}
+.cal-g .d.today{box-shadow:inset 0 0 0 1px var(--pink-400)}
+.cal-g .d.dis{opacity:.3;cursor:default;pointer-events:none}
+.cal-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.cal-foot b{font-size:.85rem}
+@media(max-width:640px){.cal-months{grid-template-columns:1fr}.cal-m:first-child{display:none}}
 .spacer{flex:1}
 .btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:9px 18px;font-weight:600;transition:.2s}
 .btn-primary{background:linear-gradient(135deg,var(--pink-500),var(--pink-600));color:#fff;box-shadow:0 6px 16px rgba(219,39,119,.28)}
@@ -232,8 +254,11 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
 
     <div class="range" id="range" hidden>
-      <div class="field"><label for="from">من</label><input type="date" id="from"></div>
-      <div class="field"><label for="to">إلى</label><input type="date" id="to"></div>
+      <button class="field" id="rangeBtn" type="button" aria-label="اختيار النطاق من التقويم">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <span id="rangeLbl">اختر النطاق</span>
+      </button>
+      <input type="date" id="from" hidden><input type="date" id="to" hidden>
     </div>
 
     <span class="spacer"></span>
@@ -430,6 +455,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
   </section>
 
+  <dialog id="calDlg" class="cal-dlg"><div class="dlg" id="calBody"></div></dialog>
   <dialog id="shareDlg"><div class="dlg" id="shareDlgBody"></div></dialog>
   <dialog id="orderDlg"><div class="dlg" id="orderDlgBody"></div></dialog>
 
@@ -1078,14 +1104,77 @@ $('#preset').addEventListener('change', e => {
     state.from = parseYmd($('#from').value); state.to = parseYmd($('#to').value);
   }
   setPreset(e.target.value);
+  if(e.target.value==='custom'){ rangeLabel(); openCal(); }
 });
 document.querySelectorAll('#quick button').forEach(b => b.addEventListener('click', () => setPreset(b.dataset.p)));
+/* ---- منتقي نطاق التاريخ (تقويم) ---- */
+const cal = {a:null, b:null, view:null, hover:null};
+const MON = d => d.toLocaleDateString('ar-SA-u-ca-gregory', {month:'long', year:'numeric'});
+const WD = ['سبت','أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة'];
+const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function rangeLabel(){ const l = $('#rangeLbl'); if(state.from && state.to) l.textContent = sameDay(state.from,state.to) ? fmtDate(state.from) : `${fmtDate(state.from)} – ${fmtDate(state.to)}`; }
+const sameDay = (x,y) => midnight(x)===midnight(y);
+function calMonth(first){
+  const y = first.getFullYear(), m = first.getMonth(), n = new Date(y, m+1, 0).getDate(), off = (first.getDay()+1)%7;
+  let lo = cal.a, hi = cal.b ?? cal.hover; if(lo!=null && hi!=null && lo>hi) [lo,hi] = [hi,lo];
+  let h = `<div class="cal-m"><h4>${MON(first)}</h4><div class="cal-g">` + WD.map(x => `<i class="wd">${x}</i>`).join('');
+  for(let i=0;i<off;i++) h += '<i></i>';
+  for(let d=1; d<=n; d++){
+    const t = new Date(y,m,d).getTime(), c = ['d'];
+    if(t>midnight(TODAY)) c.push('dis');
+    if(lo!=null && hi!=null && t>=lo && t<=hi) c.push('in');
+    if(t===lo || t===hi) c.push('s');
+    if(t===midnight(TODAY)) c.push('today');
+    h += `<i class="${c.join(' ')}" data-t="${t}">${d}</i>`;
+  }
+  return h + '</div></div>';
+}
+function calRender(){
+  const v = cal.view, nx = new Date(v.getFullYear(), v.getMonth()+1, 1), cur = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+  const lo = cal.a!=null ? Math.min(cal.a, cal.b ?? cal.a) : null, hi = cal.a!=null ? Math.max(cal.a, cal.b ?? cal.a) : null;
+  const day = t => new Date(t).toLocaleDateString('ar-SA-u-ca-gregory', {day:'numeric', month:'long', year:'numeric'});
+  const quick = [['أمس',1,1],['آخر 7 أيام',6,0],['آخر 14 يوماً',13,0],['آخر 30 يوماً',29,0],['آخر 90 يوماً',89,0]];
+  $('#calBody').innerHTML = `<div class="cal-quick">${quick.map(([t,a,b]) => `<button type="button" data-q="${a},${b}">${t}</button>`).join('')}
+      <button type="button" data-q="lm">الشهر الماضي</button><button type="button" data-q="ty">هذه السنة</button></div>
+    <div class="cal-top"><button type="button" id="calPrev">‹ الأقدم</button><button type="button" id="calNext" ${nx>=cur?'disabled':''}>الأحدث ›</button></div>
+    <div class="cal-months">${calMonth(v)}${calMonth(nx)}</div>
+    <div class="cal-foot"><b>${lo!=null ? (lo===hi ? day(lo) : day(lo)+' ← '+day(hi)) : 'اضغط يوم البداية ثم يوم النهاية'}</b>
+      <span><button class="btn" type="button" id="calCancel">إلغاء</button> <button class="btn btn-primary" type="button" id="calOk" ${lo==null?'disabled':''}>تطبيق</button></span></div>`;
+  $('#calPrev').onclick = () => { cal.view = new Date(v.getFullYear(), v.getMonth()-1, 1); calRender(); };
+  $('#calNext').onclick = () => { cal.view = nx; calRender(); };
+  $('#calCancel').onclick = () => $('#calDlg').close();
+  $('#calOk').onclick = () => calApply(lo, hi);
+  document.querySelectorAll('#calBody [data-q]').forEach(b => b.onclick = () => {
+    const q = b.dataset.q, t0 = midnight(TODAY);
+    if(q==='lm') return calApply(new Date(TODAY.getFullYear(), TODAY.getMonth()-1, 1).getTime(), new Date(TODAY.getFullYear(), TODAY.getMonth(), 0).getTime());
+    if(q==='ty') return calApply(new Date(TODAY.getFullYear(),0,1).getTime(), t0);
+    const [a,z] = q.split(',').map(Number); calApply(t0 - a*DAY, t0 - z*DAY);
+  });
+  document.querySelectorAll('#calBody .d:not(.dis)').forEach(el => {
+    el.onclick = () => { const t = Number(el.dataset.t); if(cal.a==null || cal.b!=null){ cal.a = t; cal.b = null; cal.hover = null; } else { cal.b = t; } calRender(); };
+    el.onmouseenter = () => { if(cal.a!=null && cal.b==null){ cal.hover = Number(el.dataset.t); calRender(); } };
+  });
+}
+function calApply(a, b){
+  if(a==null) return;
+  const f = new Date(Math.min(a,b)), t = new Date(Math.max(a,b));
+  $('#from').value = ymd(f); $('#to').value = ymd(t);
+  $('#calDlg').close(); onCustom();
+}
+function openCal(){
+  cal.a = state.from ? midnight(state.from) : null; cal.b = state.to ? midnight(state.to) : null; cal.hover = null;
+  const end = state.to || TODAY;
+  cal.view = new Date(end.getFullYear(), end.getMonth()-1, 1);
+  calRender(); $('#calDlg').showModal();
+}
+$('#rangeBtn').addEventListener('click', openCal);
+
 function onCustom(){
   const f = $('#from').value, t = $('#to').value;
   if(!f || !t) return;
   state.from = parseYmd(f); state.to = parseYmd(t);
   state.preset = 'custom'; state.granManual = false;
-  $('#preset').value = 'custom'; $('#range').hidden = false;
+  $('#preset').value = 'custom'; $('#range').hidden = false; rangeLabel();
   document.querySelectorAll('#quick button').forEach(b => b.classList.remove('on'));
   update();
 }
