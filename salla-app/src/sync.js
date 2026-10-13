@@ -66,7 +66,8 @@ async function syncOrdersRange(ctx, a, b) {
   }
   await upsertDays(ctx.db, ctx.merchant, [...days.values()].map(roundDay));
   if (attrRows.length) await upsertOrderRows(ctx.db, ctx.merchant, attrRows);
-  if (custRows.length) await upsertCustDays(ctx.db, ctx.merchant, custRows);
+  // إحصاءات العملاء ثانوية: فشل كتابتها لا يُسقط مزامنة الطلبات
+  if (custRows.length) { try { await upsertCustDays(ctx.db, ctx.merchant, custRows); } catch (e) { ctx.custError = String(e.message || e).slice(0, 120); } }
   return { ok: true, pages };
 }
 
@@ -228,6 +229,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
     if (ctx.currency) state.currency = ctx.currency;
     state.lastError = '';
+    state.custError = ctx.custError || state.custError || '';
     state.lastRunAt = now; state.lastLog = log.slice(0, 6); state.lastUsed = ctx.used;
   } catch (e) {
     state.lastError = String(e.message || e).slice(0, 160); state.lastErrorAt = now;

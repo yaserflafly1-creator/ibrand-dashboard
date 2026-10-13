@@ -92,7 +92,7 @@ test('inventory: served from D1; coupons/customers/shipments from Salla', async 
   const inv = await (await get(env, '/api/inventory')).json();
   assert.deepEqual([inv.items.length, inv.complete, inv.updatedAt], [1, true, 123]);
   assert.deepEqual((await (await get(env, '/api/coupons')).json()).coupons.map((c) => c.code), ['A']);
-  assert.deepEqual(await (await get(env, '/api/customers?from=2026-10-01&to=2026-10-31')).json(), { total: 0, active: 0, fresh: 0, returning: 0 });   // العملاء من جدول cust_day، لا من سلة
+  assert.deepEqual(await (await get(env, '/api/customers?from=2026-10-01&to=2026-10-31')).json(), { total: 0, active: 0, fresh: 0, returning: 0, backfillDone: false, error: '' });   // العملاء من جدول cust_day، لا من سلة
   assert.equal((await get(env, '/api/customers?from=1&to=2')).status, 400);
   const sh = await (await get(env, '/api/shipments')).json();
   assert.deepEqual(sh.shipments.map((s) => [s.courier, s.group]), [['SMSA', 'delivered'], ['SMSA', 'failed']]);

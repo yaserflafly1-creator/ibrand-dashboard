@@ -281,7 +281,8 @@ async function handleCustomers(req, env) {
   const from = q.get('from'), to = q.get('to');
   // واجهة /customers في سلة بلا إجمالي (ترقيم cursor)، فالعملاء يُحسبون من الطلبات المحمّلة في D1
   await ensureSchema(env.DB);
-  return json(await customerStats(env.DB, ctx.merchant, from, to));
+  const state = await getMeta(env.DB, ctx.merchant, 'state', {});
+  return json({ ...(await customerStats(env.DB, ctx.merchant, from, to)), backfillDone: !!state.backfillDone, error: state.custError || '' });
 }
 
 /* ---------- Cron: المزامنة لكل تاجر مثبّت ---------- */

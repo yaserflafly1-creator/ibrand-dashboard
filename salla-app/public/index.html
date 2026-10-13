@@ -1032,18 +1032,21 @@ function renderCoupons(){
 let custSeq = 0;
 async function loadCustomerStats(from, to, cur){
   const seq = ++custSeq;
-  let total = null, inRange = null, fresh = null, ret = null;
+  let total = null, inRange = null, fresh = null, ret = null, custInfo = null;
   try{
-    if(LIVE){ const j = await api(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`); total = j.total; inRange = j.active; fresh = j.fresh; ret = j.returning; }
+    if(LIVE){ const j = await api(`/api/customers?from=${ymd(from)}&to=${ymd(to)}`); total = j.total; inRange = j.active; fresh = j.fresh; ret = j.returning; custInfo = j; }
     else {
       const first = {}; ORDERS.filter(VALID).forEach(o => { if(!(o.cid in first) || o.ts<first[o.cid]) first[o.cid] = o.ts; });
       const mine = cur.list.filter(VALID), act = new Set(mine.map(o => o.cid));
+      custInfo = {backfillDone:true, error:''};
       total = Object.keys(first).length; inRange = act.size; fresh = [...act].filter(c => first[c]>=from.getTime()).length; ret = inRange - fresh;
     }
   } catch(e){ if(e.status===401) return; }
   if(seq!==custSeq) return;
   $('#custTotal').textContent = total===null ? '—' : fmt(total);
   $('#custInRange').textContent = inRange===null ? '—' : fmt(inRange);
+  const note = $('#custNote');
+  if(note) note.textContent = !custInfo ? 'تعذّر تحميل إحصاءات العملاء' : custInfo.error ? 'تعذّرت كتابة بيانات العملاء: '+custInfo.error : (total===0 ? 'تتكوّن البيانات تدريجياً أثناء تحميل الأرشيف (راجع الشريط الوردي أعلى الصفحة)' : (custInfo.backfillDone ? 'من الطلبات المكتملة وقيد التنفيذ' : 'من الطلبات المحمّلة حتى الآن، وتزداد مع تحميل الأرشيف'));
   $('#custNew').textContent = fresh===null ? '—' : fmt(fresh);
   $('#custRet').textContent = ret===null ? '—' : fmt(ret);
 }
