@@ -874,6 +874,7 @@ function renderSyncInfo(from){
   if(!syncInfo.backfillDone) parts.push(`جارٍ تحميل تاريخ المتجر من سلة${syncInfo.oldest?` (وصلنا إلى ${syncInfo.oldest})`:''}`);
   if(syncInfo.oldest && ymd(from) < syncInfo.oldest) parts.push('بعض أيام هذه الفترة لم تُحمَّل بعد فالأرقام جزئية');
   if(!syncInfo.inventoryReady) parts.push('جارٍ تجهيز المخزون وأسعار المنتجات');
+  if(syncInfo.error) parts.push('تنبيه المزامنة: '+syncInfo.error);
   el.textContent = parts.join(' · ');
 }
 
@@ -1131,28 +1132,35 @@ $('#export').addEventListener('click', () => {
 })();
 
 /* ---- روابط المشاركة (للقراءة فقط) ---- */
+let shDays = 7, shNewUrl = '';
+const shDate = ms => new Date(ms).toLocaleDateString('en-GB');
 async function shareList(){
   const body = $('#shareDlgBody');
   let list = [];
-  try{ list = (await api('/api/share')).shares; }catch(e){ body.innerHTML = '<p>تعذّر تحميل الروابط</p>'; return; }
+  try{ list = (await api('/api/share')).shares; }catch(e){ body.innerHTML = '<p>تعذّر تحميل الروابط</p><button class="btn" id="shClose" type="button">إغلاق</button>'; $('#shClose').onclick = () => $('#shareDlg').close(); return; }
+  const chip = (d, t) => `<button type="button" class="btn ${shDays===d?'btn-primary':''}" data-days="${d}">${t}</button>`;
   body.innerHTML = `<h2 style="margin-bottom:6px">مشاركة اللوحة</h2>
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:12px">رابط للقراءة فقط: يعرض الأرقام والرسوم والمنتجات والمخزون، بدون أسماء العملاء والطلبات. من يملك الرابط يراها دون حساب سلة، فشاركه بحذر.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      <input id="shLabel" placeholder="لمن الرابط؟ (اختياري)" style="flex:1;min-width:140px;padding:8px;border:1px solid var(--line);border-radius:10px">
-      <select id="shDays" style="padding:8px;border-radius:10px;border:1px solid var(--line)"><option value="1">يوم</option><option value="7" selected>7 أيام</option><option value="30">30 يوماً</option><option value="90">90 يوماً</option></select>
-      <button class="btn btn-primary" id="shNew" type="button">إنشاء رابط</button>
-    </div>
+    <input id="shLabel" placeholder="لمن الرابط؟ (اختياري)" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="align-self:center;font-size:.85rem">المدة:</span>${chip(1,'يوم')}${chip(7,'7 أيام')}${chip(30,'30 يوماً')}${chip(90,'90 يوماً')}</div>
+    <button class="btn btn-primary" id="shNew" type="button" style="margin-bottom:14px">إنشاء رابط</button>
+    ${shNewUrl ? `<div style="background:var(--pink-50,#fdf2f8);border:1px solid var(--pink-700,#db2777);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.82rem"><b>تم إنشاء الرابط ✓</b><input readonly value="${esc(shNewUrl)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid var(--line);border-radius:8px" onclick="this.select()"><button class="linkbtn" data-copy="${esc(shNewUrl)}" type="button">نسخ الرابط</button></div>` : ''}
     <div id="shList">${list.length ? list.map(x => `<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;font-size:.82rem">
-        <div><b>${esc(x.label||'بدون اسم')}</b> · ينتهي ${new Date(x.exp).toLocaleDateString('ar-SA')}</div>
+        <div><b>${esc(x.label||'بدون اسم')}</b> · ينتهي ${shDate(x.exp)}</div>
         <input readonly value="${esc(x.url)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid var(--line);border-radius:8px" onclick="this.select()">
         <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button></div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
     <button class="btn" id="shClose" type="button" style="margin-top:8px">إغلاق</button>`;
-  $('#shNew').onclick = async () => { try{ await api('/api/share', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({label:$('#shLabel').value, days:Number($('#shDays').value)})}); }catch(e){ toast('تعذّر إنشاء الرابط'); } shareList(); };
+  body.querySelectorAll('[data-days]').forEach(b => b.onclick = () => { const l = $('#shLabel').value; shDays = Number(b.dataset.days); shNewUrl = ''; shareList().then(() => { $('#shLabel').value = l; }); });
+  $('#shNew').onclick = async () => {
+    try{ const c = await api('/api/share', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({label:$('#shLabel').value, days:shDays})}); shNewUrl = c.url; }
+    catch(e){ toast('تعذّر إنشاء الرابط'); }
+    shareList();
+  };
   $('#shClose').onclick = () => $('#shareDlg').close();
   body.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy).then(() => toast('تم نسخ الرابط'), () => toast('انسخه يدوياً')); });
   body.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try{ await api('/api/share?id='+b.dataset.del, {method:'DELETE'}); }catch(e){} shareList(); });
 }
-document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ $('#shareDlg').showModal(); shareList(); } });
+document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ shNewUrl = ''; $('#shareDlg').showModal(); shareList(); } });
 
 async function boot(){
   if(LIVE && SDK && !SHARE){

@@ -91,9 +91,10 @@ async function chunk(ctx, state, ptr, lower) {
 }
 
 /* دفعة من المخزون: صفحات Product Quantities بالتسلسل، تُحفظ في D1 */
-async function inventoryChunk(ctx, state, now) {
+async function inventoryChunk(ctx, state, now, maxCalls = Infinity) {
   let page = state.invPage || 1;
-  while (ctx.used < ctx.budget) {
+  const cap = Math.min(ctx.budget, ctx.used + maxCalls);
+  while (ctx.used < cap) {
     const j = await ctx.get('/products/quantities', { page });
     await upsertInventory(ctx.db, ctx.merchant, state.invGen, (j.data || []).map(normalizeInventoryItem));
     if (page >= (j.pagination?.totalPages ?? 1)) {
@@ -133,7 +134,15 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   try {
     // 1) المخزون أولاً حتى تكتمل أول دورة (نحتاجه لأسعار المنتجات)، ثم كل ساعة
     const invDue = !state.invDoneOnce || (state.invNextAt || 0) <= now || (state.invPage || 1) > 1;
-    if (!state.invDoneOnce && invDue) { await inventoryChunk(ctx, state, now); log.push('inventory'); }
+    // أي فشل في المخزون (صلاحية/حد معدّل/كتالوج ضخم) لا يوقف مزامنة الطلبات؛ ونحجز نصف الميزانية للطلبات
+    const invOk = async (cap) => {
+      try { await inventoryChunk(ctx, state, now, cap); state.invError = ''; }
+      catch (e) { state.invError = String(e.message || e).slice(0, 120); state.invTries = (state.invTries || 0) + 1; }
+      log.push('inventory');
+    };
+    if (!state.invDoneOnce && invDue) await invOk(Math.floor(ctx.budget / 2));
+    // بعد ١٥ محاولة متعثرة نكمل الطلبات دون أسعار المنتجات بدل أن تتوقف اللوحة
+    const ready = state.invDoneOnce || (state.invTries || 0) >= 15;
 
     // 2) أحدث يومين: كل ~5 دقائق
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {
@@ -142,7 +151,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
 
     // 2b) بيانات الحملات للطلبات الجديدة (ثلث الميزانية المتبقية كحد أقصى كي لا تتأخر بقية المزامنة)
-    if (state.invDoneOnce && ctx.used < ctx.budget) {
+    if (ready && ctx.used < ctx.budget) {
       const n = await attributionChunk(ctx, Math.floor((ctx.budget - ctx.used) / 3));
       if (n) log.push('attribution');
     }
@@ -152,10 +161,10 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     if (state.lastResyncHour !== hour) { state.lastResyncHour = hour; state.resyncNext = addDays(today, -2); }
     const resyncLow = addDays(today, -30) < floor ? floor : addDays(today, -30);
     if (state.resyncNext && state.resyncNext < resyncLow) state.resyncNext = null;
-    if (state.resyncNext && ctx.used < ctx.budget && state.invDoneOnce) {
+    if (state.resyncNext && ctx.used < ctx.budget && ready) {
       const r = await chunk(ctx, state, state.resyncNext, resyncLow);
       state.resyncNext = r.done ? null : r.ptr; log.push('resync');
-    } else if (!state.backfillDone && ctx.used < ctx.budget && state.invDoneOnce) {
+    } else if (!state.backfillDone && ctx.used < ctx.budget && ready) {
       state.backfillNext = state.backfillNext || addDays(today, -31);
       if (state.backfillNext < floor) state.backfillDone = true;
       else {
@@ -166,9 +175,13 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
 
     // 5) تحديث المخزون الدوري إن بقيت ميزانية
     if (state.invDoneOnce && ctx.used < ctx.budget && ((state.invNextAt || 0) <= now || (state.invPage || 1) > 1)) {
-      await inventoryChunk(ctx, state, now); log.push('inventory');
+      await invOk();
     }
     if (ctx.currency) state.currency = ctx.currency;
+    state.lastError = '';
+  } catch (e) {
+    state.lastError = String(e.message || e).slice(0, 160); state.lastErrorAt = now;
+    throw e;
   } finally {
     state.lockUntil = 0;
     await setMeta(db, merchant, 'state', state);

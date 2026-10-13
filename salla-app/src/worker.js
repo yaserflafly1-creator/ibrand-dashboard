@@ -200,7 +200,7 @@ async function handleSummary(req, env) {
   return json({
     cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns,
     currency: state.currency || 'SAR',
-    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0 }
+    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, error: state.lastError || state.invError || '' }
   });
 }
 
