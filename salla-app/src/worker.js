@@ -205,7 +205,7 @@ async function handleSummary(req, env) {
   return json({
     cur: sumDays(curRows), prev: sumDays(prevRows, false), series: seriesOf(curRows), campaigns,
     currency: state.currency || 'SAR',
-    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, error: state.lastError || (env.INVENTORY_SYNC === 'off' ? '' : state.invError) || '' }
+    sync: { ...cov, backfillDone: !!state.backfillDone, inventoryOff: env.INVENTORY_SYNC === 'off', inventoryReady: !!state.invDoneOnce, lastRecent: state.lastRecent || 0, catalogReady: !!state.catDoneOnce, error: state.lastError || (env.INVENTORY_SYNC === 'off' ? '' : state.invError) || state.catError || '' }
   });
 }
 

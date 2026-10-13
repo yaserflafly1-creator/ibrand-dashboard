@@ -1,11 +1,11 @@
 // مزامنة الخلفية (Cron): تجلب الطلبات من سلة على دفعات صغيرة وتحفظ ملخصات يومية في D1.
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
-import { normalizeOrder, normalizeInventoryItem, normalizeAttribution } from './salla.js';
+import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
-const SCHEMA = 3;
+const SCHEMA = 4;   // 4: أسعار الأصناف من كتالوج المنتجات (تُعاد مزامنة الأرشيف مرة واحدة)
 export const CAMPAIGN_DAYS_DEFAULT = 90;
 export const addDays = (day, n) => new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 export const riyadhDay = (ms) => new Date(ms + 3 * 3600e3).toISOString().slice(0, 10);
@@ -17,6 +17,7 @@ export async function priceMap(db, merchant) {
   const hit = priceCache.get(merchant);
   if (hit && hit.exp > Date.now()) return hit.map;
   const map = new Map();
+  for (const r of await readPrices(db, merchant)) if (r.price > 0) map.set(r.name, { price: r.price, img: r.img });
   for (const it of await readInventory(db, merchant)) {
     const key = String(it.name).trim().toLowerCase();
     if (it.price > 0 && !map.has(key)) map.set(key, { price: it.price, img: it.img });
@@ -96,6 +97,23 @@ async function chunk(ctx, state, ptr, lower) {
   return { ptr: addDays(start, -1), done: start <= lower };
 }
 
+/* دفعة من كتالوج المنتجات (أسعار الوحدة): GET /products?format=light صفحة بصفحة، تُحفظ في جدول prices */
+async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
+  let page = state.catPage || 1;
+  const cap = Math.min(ctx.budget, ctx.used + maxCalls);
+  while (ctx.used < cap) {
+    const j = await ctx.get('/products', { format: 'light', page, per_page: 30 });
+    await upsertPrices(ctx.db, ctx.merchant, buildPriceMap(j.data));
+    if (page >= (j.pagination?.totalPages ?? 1)) {
+      state.catPage = 1; state.catDoneOnce = true; state.catNextAt = now + 6 * 3600e3;
+      clearPriceCache(); ctx.prices = await priceMap(ctx.db, ctx.merchant);
+      return true;
+    }
+    page++; state.catPage = page;
+  }
+  return false;
+}
+
 /* دفعة من المخزون: صفحات Product Quantities بالتسلسل، تُحفظ في D1 */
 async function inventoryChunk(ctx, state, now, maxCalls = Infinity) {
   let page = state.invPage || 1;
@@ -136,7 +154,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); }
   state.invGen = state.invGen || 1;
   const log = [];
-  const invOn = env.INVENTORY_SYNC !== 'off';
+  const invOn = env.INVENTORY_SYNC !== 'off', catOn = env.CATALOG_SYNC !== 'off';
 
   try {
     // 1) المخزون أولاً حتى تكتمل أول دورة (نحتاجه لأسعار المنتجات)، ثم كل ساعة
@@ -149,7 +167,14 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     };
     if (invOn && !state.invDoneOnce && invDue) await invOk(Math.floor(ctx.budget / 2));
     // بعد ١٥ محاولة متعثرة نكمل الطلبات دون أسعار المنتجات بدل أن تتوقف اللوحة
-    const ready = !invOn || state.invDoneOnce || (state.invTries || 0) >= 15;
+    const catDue = catOn && (!state.catDoneOnce || (state.catNextAt || 0) <= now || (state.catPage || 1) > 1);
+    const catRun = async (cap) => {
+      try { await catalogChunk(ctx, state, now, cap); state.catError = ''; }
+      catch (e) { state.catError = String(e.message || e).slice(0, 120); state.catTries = (state.catTries || 0) + 1; }
+      log.push('catalog');
+    };
+    if (catDue && !state.catDoneOnce) await catRun(Math.floor((ctx.budget - ctx.used) / 2));
+    const ready = (!invOn || state.invDoneOnce || (state.invTries || 0) >= 15) && (!catOn || state.catDoneOnce || (state.catTries || 0) >= 15);
 
     // 2) أحدث يومين: كل ~5 دقائق
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {
@@ -181,6 +206,7 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     }
 
     // 5) تحديث المخزون الدوري إن بقيت ميزانية
+    if (catDue && state.catDoneOnce && ctx.used < ctx.budget) await catRun();
     if (invOn && state.invDoneOnce && ctx.used < ctx.budget && ((state.invNextAt || 0) <= now || (state.invPage || 1) > 1)) {
       await invOk();
     }

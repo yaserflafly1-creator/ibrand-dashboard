@@ -1150,11 +1150,27 @@ function calRender(){
     if(q==='ty') return calApply(new Date(TODAY.getFullYear(),0,1).getTime(), t0);
     const [a,z] = q.split(',').map(Number); calApply(t0 - a*DAY, t0 - z*DAY);
   });
-  document.querySelectorAll('#calBody .d:not(.dis)').forEach(el => {
-    el.onclick = () => { const t = Number(el.dataset.t); if(cal.a==null || cal.b!=null){ cal.a = t; cal.b = null; cal.hover = null; } else { cal.b = t; } calRender(); };
-    el.onmouseenter = () => { if(cal.a!=null && cal.b==null){ cal.hover = Number(el.dataset.t); calRender(); } };
+}
+// تحديث الألوان دون إعادة بناء العناصر (إعادة البناء أثناء المرور بالفأرة كانت تُفقد النقرة)
+function calPaint(){
+  let lo = cal.a, hi = cal.b ?? cal.hover; if(lo!=null && hi!=null && lo>hi) [lo,hi] = [hi,lo];
+  document.querySelectorAll('#calBody .d').forEach(el => {
+    const t = Number(el.dataset.t);
+    el.classList.toggle('in', lo!=null && hi!=null && t>=lo && t<=hi);
+    el.classList.toggle('s', t===lo || t===hi);
   });
 }
+$('#calBody').addEventListener('click', e => {
+  const el = e.target.closest('.d'); if(!el || el.classList.contains('dis')) return;
+  const t = Number(el.dataset.t);
+  if(cal.a==null || cal.b!=null){ cal.a = t; cal.b = null; cal.hover = null; } else { cal.b = t; }
+  calRender();
+});
+$('#calBody').addEventListener('mouseover', e => {
+  const el = e.target.closest('.d'); if(!el || el.classList.contains('dis') || cal.a==null || cal.b!=null) return;
+  const t = Number(el.dataset.t); if(cal.hover===t) return;
+  cal.hover = t; calPaint();
+});
 function calApply(a, b){
   if(a==null) return;
   const f = new Date(Math.min(a,b)), t = new Date(Math.max(a,b));

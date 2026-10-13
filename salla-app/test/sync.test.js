@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeD1, makeKV, fakeSalla } from './helpers.js';
 import { syncMerchant, addDays, clearPriceCache } from '../src/sync.js';
-import { ensureSchema, rangeRows, coverage, getMeta, readInventory, campaignStats } from '../src/db.js';
+import { ensureSchema, rangeRows, coverage, getMeta, readInventory, campaignStats, readPrices } from '../src/db.js';
 
 const NOW = Date.parse('2026-10-12T09:00:00Z');   // 12:00 الرياض
 const TODAY = '2026-10-12';
-const setup = (over = {}) => ({ DB: makeD1(), TOKENS: makeKV(), BACKFILL_DAYS: '60', SYNC_BUDGET: '40', ...over });
+const setup = (over = {}) => ({ DB: makeD1(), TOKENS: makeKV(), BACKFILL_DAYS: '60', SYNC_BUDGET: '40', CATALOG_SYNC: 'off', ...over });
 
 test('first run loads inventory first, then orders; prices come from inventory', async () => {
   clearPriceCache();
@@ -89,7 +89,7 @@ test('schema bump restarts the backfill once', async () => {
   await setMeta(env.DB, 'm1', 'state', { ...st, schema: 1 });          // محاكاة صفوف بالشكل القديم
   await syncMerchant(env, 'm1', { get }, NOW + 13 * 60000);
   st = await getMeta(env.DB, 'm1', 'state', {});
-  assert.equal(st.schema, 3);
+  assert.equal(st.schema, 4);
   assert.ok(st.backfillDone === false || st.backfillNext !== null || st.resyncNext, 'backfill restarted');
 });
 
@@ -109,4 +109,27 @@ test('campaign attribution: order details fetched once per order, stats by sourc
   assert.equal(st.campaigns[0].camp, '1202');
   assert.equal(st.campaigns[0].src, 'instagram');
   assert.equal(st.attributed, k.instagram.orders + k[''].orders);
+});
+
+test('catalog prices (inventory off): orders are priced by product name, sale price wins; backfill waits for the catalog', async () => {
+  clearPriceCache();
+  const env = setup({ CATALOG_SYNC: 'on', INVENTORY_SYNC: 'off', BACKFILL_DAYS: '3' });
+  const get = fakeSalla({ perDay: 4 });
+  const r = await syncMerchant(env, 'm1', { get }, NOW);
+  assert.equal(r.log[0], 'catalog');
+  assert.deepEqual((await readPrices(env.DB, 'm1')).map((x) => [x.name, x.price]).sort(), [['dress', 70], ['shoe', 60]]);
+  const rows = await rangeRows(env.DB, 'm1', TODAY, TODAY);
+  assert.equal(rows[0].prod.Dress[1], 210);   // 3 × سعر العرض 70، لا تقدير الإجمالي
+  const st = await getMeta(env.DB, 'm1', 'state', {});
+  assert.equal(st.catDoneOnce, true);
+});
+
+test('catalog failure does not stall orders', async () => {
+  clearPriceCache();
+  const env = setup({ CATALOG_SYNC: 'on', INVENTORY_SYNC: 'off' });
+  const base = fakeSalla({ perDay: 2 });
+  const get = async (path, p) => { if (path === '/products') throw new Error('salla 422 /products bad'); return base(path, p); };
+  const r = await syncMerchant(env, 'm1', { get }, NOW);
+  assert.ok(r.log.includes('recent'));
+  assert.match((await getMeta(env.DB, 'm1', 'state', {})).catError, /422/);
 });

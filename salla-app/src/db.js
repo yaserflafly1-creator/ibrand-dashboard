@@ -9,6 +9,7 @@ export async function ensureSchema(db) {
     db.prepare('CREATE TABLE IF NOT EXISTS inventory (merchant TEXT NOT NULL, id TEXT NOT NULL, gen INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (merchant, id))'),
     // طلب واحد لكل صف: يُملأ من قائمة الطلبات، ثم تُكمَّل بيانات الحملة (att=1) من تفاصيل الطلب
     db.prepare("CREATE TABLE IF NOT EXISTS order_attr (merchant TEXT NOT NULL, id TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, total REAL NOT NULL, att INTEGER NOT NULL DEFAULT 0, src TEXT NOT NULL DEFAULT '', med TEXT NOT NULL DEFAULT '', camp TEXT NOT NULL DEFAULT '', PRIMARY KEY (merchant, id))"),
+    db.prepare('CREATE TABLE IF NOT EXISTS prices (merchant TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL, img TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (merchant, name))'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_pending ON order_attr (merchant, att, day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_day ON order_attr (merchant, day)')
   ]);
@@ -44,6 +45,14 @@ export const upsertInventory = (db, m, gen, items) => batched(db, items.map((it)
   db.prepare('INSERT INTO inventory (merchant, id, gen, data) VALUES (?, ?, ?, ?) ON CONFLICT(merchant, id) DO UPDATE SET gen = excluded.gen, data = excluded.data')
     .bind(m, `${it.id}:${it.skuId || 0}`, gen, JSON.stringify(it))));
 export const dropOldInventory = (db, m, gen) => db.prepare('DELETE FROM inventory WHERE merchant = ? AND gen < ?').bind(m, gen).run();
+/* كتالوج الأسعار (اسم المنتج -> سعر الوحدة الحالي) من قائمة المنتجات */
+export const upsertPrices = (db, m, map) => batched(db, [...map].map(([name, v]) =>
+  db.prepare('INSERT INTO prices (merchant, name, price, img) VALUES (?, ?, ?, ?) ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img')
+    .bind(m, name, v.price, v.img || '')));
+export async function readPrices(db, m) {
+  const { results } = await db.prepare('SELECT name, price, img FROM prices WHERE merchant = ?').bind(m).all();
+  return results;
+}
 export async function readInventory(db, m) {
   const { results } = await db.prepare('SELECT data FROM inventory WHERE merchant = ?').bind(m).all();
   return results.map((r) => JSON.parse(r.data));
