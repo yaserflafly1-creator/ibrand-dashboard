@@ -53,6 +53,7 @@ button{cursor:pointer}
 [hidden]{display:none!important}
 .range[hidden]{display:none}
 #rangeBtn{cursor:pointer;font-weight:600}
+#cnlKind{display:none}
 .cal-dlg{max-width:680px}
 .cal-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
 .cal-top button{background:var(--pink-50);border:1px solid var(--border);border-radius:999px;padding:6px 14px;cursor:pointer}
@@ -411,9 +412,9 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 
   <section class="card panel sec" id="cnlPanel">
     <div class="panel-h">
-      <div><h2>الطلبات الملغية والمسترجعة</h2><p id="cnlSub"></p></div>
+      <div><h2>الطلبات الملغية</h2><p id="cnlSub"></p></div>
       <div class="seg" id="cnlKind" role="group" aria-label="النوع">
-        <button data-k="canceled" class="on">ملغية</button><button data-k="refunded">مسترجعة</button>
+        <button data-k="canceled" class="on">ملغية</button>
       </div>
     </div>
     <div class="mini-kpis" style="grid-template-columns:repeat(4,1fr)">
@@ -636,8 +637,8 @@ function renderKpis(cur, prev){
     {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)},
     {k:'orders', lbl:'عدد الطلبات', val:fmt(cur.orders), d:deltaHTML(cur.orders, prev.orders)},
     {k:'aov', lbl:'متوسط قيمة الطلب', val:money(cur.aov), unit:CURRENCY, d:deltaHTML(cur.aov, prev.aov)},
-    {k:'cancel', cls:'alert', lbl:'الملغية / المسترجعة', val:fmt(cur.lost), d:deltaHTML(cur.lost, prev.lost, true),
-      sub:`قيمة مفقودة: ${money(cur.lostValue)} ${CURRENCY}`},
+    {k:'cancel', cls:'alert', lbl:'الطلبات الملغية', val:fmt(cur.counts.canceled), d:deltaHTML(cur.counts.canceled, prev.counts.canceled, true),
+      sub:`قيمة مفقودة: ${money(cur.lostDetail ? cur.lostDetail.canceled.value : cur.lostValue)} ${CURRENCY}`},
     {k:'products', lbl:'المنتجات المباعة', val:fmt(cur.sold), unit:'قطعة', d:deltaHTML(cur.sold, prev.sold)}
   ];
   $('#kpis').innerHTML = items.map(i => `
@@ -707,7 +708,7 @@ function renderStatus(cur){
   const rows = [
     {l:'مكتمل', v:c.completed, c:'#ec4899'},
     {l:'قيد التنفيذ', v:c.shipping, c:'#f9a8d4'},
-    {l:'ملغي / مسترجع', v:c.canceled+c.refunded, c:'#9f1239'}
+    {l:'ملغي', v:c.canceled, c:'#9f1239'}
   ];
   const data = {labels:rows.map(r=>r.l), datasets:[{data:rows.map(r=>r.v), backgroundColor:rows.map(r=>r.c), borderWidth:3, borderColor:'#fff', hoverOffset:6}]};
   const opts = {responsive:true, maintainAspectRatio:false, cutout:'72%',
@@ -804,7 +805,7 @@ function renderTop(cur){
 }
 
 /* ============ Main update ============ */
-/* ============ الطلبات الملغية والمسترجعة ============ */
+/* ============ الطلبات الملغية ============ */
 let cnlKind = 'canceled', cnlChart;
 function renderCancel(cur, from, to){
   const L = cur.lostDetail && cur.lostDetail[cnlKind]; if(!L) return;
@@ -818,7 +819,7 @@ function renderCancel(cur, from, to){
     <li><div class="row"><b>${esc(p.name)}</b><span>${fmt(p.qty)} قطعة · ${money(p.total)} ${CURRENCY}</span></div>
     <div class="bar"><i style="width:${p.qty/max*100}%"></i></div></li>`).join('') : '<li class="empty">لا توجد بيانات</li>';
   renderBars('#cnlPay', L.pay, PAY_AR); renderBars('#cnlCity', L.city);
-  // الرسم: عدد الملغية/المسترجعة حسب التجميع المختار (يومي/شهري/سنوي)
+  // الرسم: عدد الملغية حسب التجميع المختار (يومي/شهري/سنوي)
   const ci = isC ? 3 : 5, vi = isC ? 4 : 6, sr = buildSeries(from, to, state.gran), vals = new Array(sr.labels.length).fill(0);
   (cur.series||[]).forEach(r => { const i = sr.idx[sr.keyOf(r[0])]; if(i===undefined) return; sr.cnt[i] += r[ci]||0; vals[i] += r[vi]||0; });
   const data = {labels:sr.labels, datasets:[{label:isC?'الملغية':'المسترجعة', data:sr.cnt, backgroundColor:'#9f1239', borderRadius:5, maxBarThickness:22}]};
@@ -1259,25 +1260,25 @@ function exportReport(){
   const days = Math.round((v.to - v.from)/DAY) + 1;
   const lab = (map,k) => (map && map[k]) || (k==='unknown' ? 'غير محدد' : k);
   const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
-    ['الطلبات الملغية/المسترجعة', c.lost, p&&p.lost, 4], ['قيمة الملغي/المسترجع ('+CURRENCY+')', c.lostValue, p&&p.lostValue, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4]];
+    ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4]];
   const sheets = [];
   sheets.push({name:'الملخص', widths:[34,18,18,14], rows:[
     [{v:'تقرير المبيعات', s:2}], ['الفترة', `${ymd(v.from)} إلى ${ymd(v.to)} (${days} يوم)`], ['تاريخ التصدير', new Date().toLocaleString('en-GB')], [],
     H(['المؤشر','الفترة الحالية','الفترة السابقة','التغيّر']),
-    ...kpi.map(([t,a,b,st]) => [t, {v:Number(a)||0, s:st}, p ? {v:Number(b)||0, s:st} : '—', p ? chg(Number(a)||0, Number(b)||0) : '—']), [],
+    ...kpi.map(([t,a,b,st]) => [t, {v:Number(a)||0, s:st}, p && b!=null ? {v:Number(b)||0, s:st} : '—', p && b!=null ? chg(Number(a)||0, Number(b)||0) : '—']), [],
     H(['حالة الطلبات','العدد']),
-    ['مكتمل', I(c.counts.completed)], ['قيد التنفيذ', I(c.counts.shipping)], ['ملغي', I(c.counts.canceled)], ['مسترجع', I(c.counts.refunded)]
+    ['مكتمل', I(c.counts.completed)], ['قيد التنفيذ', I(c.counts.shipping)], ['ملغي', I(c.counts.canceled)]
   ]});
-  sheets.push({name:'يومي', widths:[14,12,16,12,16,12,16], rows:[H(['اليوم','الطلبات','المبيعات','ملغي (عدد)','ملغي (قيمة)','مسترجع (عدد)','مسترجع (قيمة)']),
-    ...(c.series||[]).map(r => [r[0], I(r[1]), M(r[2]), I(r[3]), M(r[4]), I(r[5]), M(r[6])])]});
+  sheets.push({name:'يومي', widths:[14,12,16,12,16], rows:[H(['اليوم','الطلبات','المبيعات','ملغي (عدد)','ملغي (قيمة)']),
+    ...(c.series||[]).map(r => [r[0], I(r[1]), M(r[2]), I(r[3]), M(r[4])])]});
   sheets.push({name:'المنتجات', widths:[56,12,16,10], rows:[H(['المنتج','الكمية','المبيعات','الحصة']), ...(c.products||[]).map(x => [x.name, I(x.qty), M(x.total), P(x.share)])]});
   const lost = k => { const L = c.lostDetail && c.lostDetail[k]; if(!L) return []; const t = k==='canceled' ? 'الملغية' : 'المسترجعة';
     return [[{v:'الطلبات '+t, s:2}], H(['عدد الطلبات','القيمة','النسبة من الطلبات','متوسط القيمة']), [I(L.count), M(L.value), P(L.rate), M(L.avg)], [],
       H(['أكثر المنتجات '+(k==='canceled'?'إلغاءً':'استرجاعاً'),'الكمية','القيمة']), ...L.products.map(x => [x.name, I(x.qty), M(x.total)]), [],
       H(['حسب المدينة','طلبات','القيمة']), ...L.city.map(x => [lab(null,x.k), I(x.orders), M(x.total)]), [],
       H(['حسب طريقة الدفع','طلبات','القيمة']), ...L.pay.map(x => [lab(PAY_AR,x.k), I(x.orders), M(x.total)]), [], []]; };
-  const lr = [...lost('canceled'), ...lost('refunded')];
-  if(lr.length) sheets.push({name:'الملغية والمسترجعة', widths:[56,14,16,16], rows:lr});
+  const lr = lost('canceled');
+  if(lr.length) sheets.push({name:'الملغية', widths:[56,14,16,16], rows:lr});
   const blk = (title, rows, map) => [H([title,'طلبات','المبيعات','الحصة']), ...(() => { const t = rows.reduce((s,r)=>s+r.total,0)||1; return rows.map(x => [lab(map,x.k), I(x.orders), M(x.total), P(x.total/t*100)]); })(), []];
   sheets.push({name:'المدن والدفع والمصادر', widths:[34,12,16,10], rows:[...blk('المدينة', c.city||[]), ...blk('طريقة الدفع', c.pay||[], PAY_AR), ...blk('مصدر الطلب', c.src||[], SRC_AR)]});
   if(c.campaigns && (c.campaigns.sources.length || c.campaigns.campaigns.length))
