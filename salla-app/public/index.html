@@ -243,6 +243,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <div class="seg" id="quick" role="group" aria-label="تصفية سريعة">
       <button data-p="today">اليوم</button>
       <button data-p="month" class="on">هذا الشهر</button>
+      <button data-p="lastmonth">الشهر الماضي</button>
       <button data-p="year">هذه السنة</button>
     </div>
 
@@ -252,6 +253,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
         <option value="today">مبيعات اليوم</option>
         <option value="week">مبيعات الأسبوع</option>
         <option value="month" selected>مبيعات الشهر</option>
+        <option value="lastmonth">مبيعات الشهر الماضي</option>
         <option value="year">مبيعات السنة</option>
         <option value="custom">نطاق مخصص…</option>
       </select>
@@ -562,6 +564,7 @@ function rangeFor(preset){
   if(preset==='today') return [t, t];
   if(preset==='week'){ const back = (t.getDay()+1)%7; return [new Date(t.getTime()-back*DAY), t]; } // الأسبوع يبدأ السبت
   if(preset==='month') return [new Date(t.getFullYear(), t.getMonth(), 1), t];
+  if(preset==='lastmonth') return [new Date(t.getFullYear(), t.getMonth()-1, 1), new Date(t.getFullYear(), t.getMonth(), 0)];
   if(preset==='year')  return [new Date(t.getFullYear(), 0, 1), t];
   return [state.from, state.to];
 }
@@ -621,6 +624,12 @@ function aggregate(from, to){
   };
 }
 function previousRange(from, to){
+  // شهر تقويمي كامل (مثل «الشهر الماضي»): نقارنه بالشهر الذي قبله كاملاً لا بعدد الأيام نفسه
+  const f0 = startOfDay(from), t0 = startOfDay(to);
+  if(f0.getDate()===1 && new Date(t0.getFullYear(), t0.getMonth()+1, 0).getDate()===t0.getDate() && f0.getMonth()===t0.getMonth() && f0.getFullYear()===t0.getFullYear()){
+    const pF = new Date(f0.getFullYear(), f0.getMonth()-1, 1), pT = new Date(f0.getFullYear(), f0.getMonth(), 0);
+    return [pF, pT, t0.getDate()];
+  }
   const days = Math.round((startOfDay(to)-startOfDay(from))/DAY)+1;
   const pTo = new Date(from.getTime()-DAY);
   const pFrom = new Date(pTo.getTime()-(days-1)*DAY);
