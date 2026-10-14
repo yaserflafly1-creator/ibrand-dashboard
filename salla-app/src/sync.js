@@ -2,7 +2,7 @@
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
 import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, initCustFirst, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, initCustFirst, seedCatalog, dropDaysBefore, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
 const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
@@ -74,7 +74,7 @@ async function syncOrdersRange(ctx, a, b) {
       priceLines(o, ctx.prices);
       if (o.currency) ctx.currency = o.currency;
       addOrder(days.get(o.day), o);
-      if (o.customerId != null && (o.status === 'completed' || o.status === 'shipping')) custRows.push([o.customerId, o.day]);
+      if (o.customerId != null && o.day >= ctx.custFloor && (o.status === 'completed' || o.status === 'shipping')) custRows.push([o.customerId, o.day]);   // إحصاءات العملاء لآخر CUST_DAYS يوماً فقط (حد كتابة D1 اليومي)
       if (o.day >= ctx.attrFloor && o.sallaId != null) attrRows.push({ id: o.sallaId, day: o.day, status: o.status, total: o.total });
     }
     if (page >= (j.pagination?.totalPages ?? 1)) break;
@@ -156,7 +156,7 @@ async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
     const j = await ctx.get('/products', { format: 'light', page, per_page: 30 });
     await upsertCatalog(ctx.db, ctx.merchant, buildPriceMap(j.data));
     if (page >= (j.pagination?.totalPages ?? 1)) {
-      state.catPage = 1; state.catDoneOnce = true; state.catNextAt = now + 6 * 3600e3;
+      state.catPage = 1; state.catDoneOnce = true; state.catFull = state.catVer || 1; state.catNextAt = now + 6 * 3600e3;
       clearPriceCache(); await catalogBlob(ctx.kv, ctx.db, ctx.merchant, true); ctx.prices = await priceMap(ctx.db, ctx.merchant, ctx.kv);
       return true;
     }
@@ -197,11 +197,14 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   ctx.get = async (path, params) => { ctx.used++; return get(path, params); };
   setDbHook(() => { ctx.used++; });
   ctx.kv = env.TOKENS;
+  // قبل أي بناء للأسعار: بذر الكتالوج الجديد من الأسعار القديمة مرة واحدة (كي لا تُبنى لقطة ناقصة)
+  if (!state.catSeeded) { ctx.used++; await seedCatalog(db, merchant); state.catSeeded = true; clearPriceCache(); }
   ctx.prices = await priceMap(db, merchant, ctx.kv);
   if (!state.custFirstInit) { ctx.used++; await initCustFirst(db, merchant); state.custFirstInit = true; }   // تعبئة أول يوم شراء للعملاء من البيانات السابقة (مرة واحدة)
 
   const today = riyadhDay(now);
   ctx.attrFloor = addDays(today, -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
+  ctx.custFloor = addDays(today, -(Number(env.CUST_DAYS) || 120));
   const floor = addDays(today, -(Number(env.BACKFILL_DAYS) || 400));
   state.ppd = state.ppd || 5;
   // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
@@ -233,6 +236,13 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     const ready = (!invOn || state.invDoneOnce || (state.invTries || 0) >= 15) && (!catOn || state.catDoneOnce || (state.catTries || 0) >= 15);
 
     if (ready && !state.dateMode && (state.probeTries || 0) < 6) { try { await probeDateMode(ctx, state, today); } catch (e) { state.probeError = String(e.message || e).slice(0, 100); } ctx.dateExact = state.dateMode === 'exact'; if (state.dateMode) log.push('probe:' + state.dateMode); }
+
+    // أيام أُنشئت بينما الكتالوج ناقص (أسعار مقدَّرة): بعد اكتمال الكتالوج الكامل نحذف ملخصات ما قبل آخر 30 يوماً مرة واحدة ليُعاد جلبها بالأسعار الصحيحة
+    // (آخر 30 يوماً تُصحَّح تلقائياً بإعادة المزامنة العميقة)
+    if (state.catFull === 2 && !state.repriced) {
+      ctx.used++; await dropDaysBefore(db, merchant, addDays(today, -30));
+      state.repriced = true; state.backfillDone = false; state.gapPtr = null; state.gapLo = null; log.push('reprice');
+    }
 
     // 2) أحدث يومين: كل ~5 دقائق
     if (ctx.used < ctx.budget && now - (state.lastRecent || 0) > 270000) {

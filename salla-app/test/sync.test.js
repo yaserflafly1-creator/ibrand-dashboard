@@ -211,3 +211,22 @@ test('customers: first purchase day tracked across days (new vs returning) and m
   assert.equal(await customerTotal(env.DB, 'm1'), 2);
   assert.equal((await customerStats(env.DB, 'm1', '2026-09-01', '2026-09-30')).fresh, 1);
 });
+
+test('migration: catalog seeded from legacy prices; one-time reprice drops older days and refills them', async () => {
+  clearPriceCache();
+  const env = setup({ CATALOG_SYNC: 'off', INVENTORY_SYNC: 'off', BACKFILL_DAYS: '45' });
+  await ensureSchema(env.DB);
+  await env.DB.prepare("INSERT INTO prices (merchant, name, price, img) VALUES ('m1', 'dress', 55, '')").run();
+  const get = fakeSalla({ perDay: 3 });
+  let t = NOW;
+  for (let i = 0; i < 80; i++, t += 60000) if ((await syncMerchant(env, 'm1', { get }, t)).backfillDone) break;
+  const { readCatalog, setMeta } = await import('../src/db.js');
+  assert.equal((await readCatalog(env.DB, 'm1'))[0].price, 55);                       // بُذر من الأسعار القديمة
+  assert.equal((await rangeRows(env.DB, 'm1', addDays(TODAY, -45), TODAY)).length, 46);
+  const st = await getMeta(env.DB, 'm1', 'state', {});
+  await setMeta(env.DB, 'm1', 'state', { ...st, catFull: 2, repriced: false });
+  const r = await syncMerchant(env, 'm1', { get }, t); t += 60000;
+  assert.ok(r.log && r.log.includes('reprice'), JSON.stringify(r));
+  for (let i = 0; i < 60; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  assert.equal((await rangeRows(env.DB, 'm1', addDays(TODAY, -45), TODAY)).length, 46);  // وأُعيد جلبها
+});

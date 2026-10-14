@@ -81,6 +81,10 @@ export const upsertCustDays = (db, m, pairs) => {
       [...first].map(([cid, day]) => [m, cid, day]), 3)
   ], 50);
 };
+// بذر جدول الكتالوج من جدول الأسعار القديم مرة واحدة: لئلا تُبنى لقطة ناقصة بينما يُحدَّث الكتالوج بالتصنيفات
+export const seedCatalog = (db, m) => db.prepare("INSERT OR IGNORE INTO catalog (merchant, name, price, img, cat) SELECT merchant, name, price, img, '' FROM prices WHERE merchant = ?").bind(m).run();
+// حذف ملخصات الأيام الأقدم من يوم معيّن ليُعاد جلبها (يملؤها كشف الفجوات)
+export const dropDaysBefore = (db, m, day) => db.prepare('DELETE FROM day_agg WHERE merchant = ? AND day < ?').bind(m, day).run();
 // تعبئة cust_first من cust_day مرة واحدة (بيانات سابقة لإضافة الجدول)
 export const initCustFirst = (db, m) => db.prepare('INSERT INTO cust_first (merchant, cid, first_day) SELECT merchant, cid, MIN(day) FROM cust_day WHERE merchant = ? GROUP BY cid ON CONFLICT(merchant, cid) DO UPDATE SET first_day = excluded.first_day WHERE excluded.first_day < cust_first.first_day').bind(m).run();
 export async function customerStats(db, m, from, to) {
