@@ -643,7 +643,7 @@ function aggregate(from, to){
       return {sources:Object.values(sm).sort(byTotal), campaigns:Object.values(cm).sort(byTotal).slice(0,40), attributed:valid.length, total:valid.length, since:null};
     })(),
     series: Object.values(days).sort((x,y) => x[0]<y[0]?-1:1),
-    orders: list.length,
+    orders: list.length, valid: valid.length,
     aov: valid.length ? revenue/valid.length : 0,
     lost: lost.length,
     lostValue: lost.reduce((s,o)=>s+o.total,0),
@@ -684,7 +684,7 @@ const unitAvg = c => c.sold ? (c.productSales||0) / c.sold : 0;
 function renderKpis(cur, prev){
   const items = [
     {k:'revenue', cls:'hero', lbl:'إجمالي المبيعات', val:money(cur.revenue), unit:CURRENCY, d:deltaHTML(cur.revenue, prev.revenue)},
-    {k:'orders', lbl:'عدد الطلبات', val:fmt(cur.orders), d:deltaHTML(cur.orders, prev.orders)},
+    {k:'orders', lbl:'عدد الطلبات', val:fmt(cur.valid), d:deltaHTML(cur.valid, prev.valid), sub:`${fmt(cur.orders)} طلب بالملغية`},
     {k:'aov', lbl:'متوسط قيمة الطلب', val:money(cur.aov), unit:CURRENCY, d:deltaHTML(cur.aov, prev.aov)},
     {k:'cancel', cls:'alert', lbl:'الطلبات الملغية', val:fmt(cur.counts.canceled), d:deltaHTML(cur.counts.canceled, prev.counts.canceled, true),
       sub:`قيمة مفقودة: ${money(cur.lostDetail ? cur.lostDetail.canceled.value : cur.lostValue)} ${CURRENCY}`},
@@ -1354,7 +1354,7 @@ function exportReport(){
   const chg = (a,b) => (b ? {v:((a-b)/b)*100, s:5} : '—');
   const days = Math.round((v.to - v.from)/DAY) + 1;
   const lab = (map,k) => (map && map[k]) || (k==='unknown' ? 'غير محدد' : k);
-  const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
+  const kpi = [['إجمالي المبيعات ('+CURRENCY+')', c.revenue, p&&p.revenue, 3], ['عدد الطلبات (بدون الملغية)', c.valid, p&&p.valid, 4], ['إجمالي الطلبات (مع الملغية)', c.orders, p&&p.orders, 4], ['متوسط قيمة الطلب ('+CURRENCY+')', c.aov, p&&p.aov, 3],
     ['الطلبات الملغية', c.counts.canceled, p&&p.counts.canceled, 4], ['قيمة الملغي ('+CURRENCY+')', c.lostDetail ? c.lostDetail.canceled.value : c.lostValue, null, 3], ['المنتجات المباعة (قطعة)', c.sold, p&&p.sold, 4], ['مبيعات المنتجات شامل الضريبة وبدون الشحن ('+CURRENCY+')', c.productSales, p ? p.productSales : null, 3], ['متوسط سعر القطعة شامل الضريبة وبدون الشحن ('+CURRENCY+')', unitAvg(c), p ? unitAvg(p) : null, 3]];
   const sheets = [];
   sheets.push({name:'الملخص', widths:[34,18,18,14], rows:[
