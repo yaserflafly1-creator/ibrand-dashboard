@@ -78,3 +78,21 @@ test('VAT factor: product sales / category totals include tax for taxable produc
   const r = categoryStats([roundDay(d)], new Map([['taxed', 'أ'], ['exempt', 'ب']]), vat);
   assert.deepEqual(r.list.map((c) => [c.name, c.total]), [['أ', 230], ['ب', 100]]);
 });
+
+test('basket analysis: size histograms, averages and frequently-bought-together pairs', async () => {
+  const { emptyBasket, addBasket, roundBasket, sumBaskets } = await import('../src/agg.js');
+  const b = emptyBasket('2026-10-10');
+  const mk = (total, lines) => ({ total, lines: lines.map(([name, qty]) => ({ name, qty, price: 1, img: '' })) });
+  addBasket(b, mk(100, [['A', 1]]));                          // سلة من قطعة
+  addBasket(b, mk(250, [['A', 2], ['B', 1]]));                // 3 قطع، منتجان
+  addBasket(b, mk(300, [['B', 1], ['A', 1], ['C', 1]]));      // 3 قطع، 3 منتجات
+  addBasket(b, mk(90, [['B ', 1], ['A', 1]]));                // مسافة زائدة تُطبَّع؛ قطعتان
+  const s = sumBaskets([roundBasket(b)]);
+  assert.equal(s.orders, 4); assert.equal(s.units, 9);
+  assert.equal(s.avgUnits, 2.25); assert.equal(s.avgValue, 185);
+  assert.equal(s.units_hist.find((h) => h.k === '3').orders, 2);
+  assert.equal(s.lines_hist.find((h) => h.k === '2').orders, 2);
+  assert.equal(Math.round(s.singleShare), 25);
+  assert.deepEqual([s.pairs[0].a, s.pairs[0].b, s.pairs[0].orders], ['A', 'B', 3]);   // A+B في 3 طلبات
+  assert.equal(Math.round(s.pairs[0].support), 75);
+});

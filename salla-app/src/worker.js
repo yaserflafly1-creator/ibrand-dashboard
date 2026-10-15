@@ -1,6 +1,6 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
-import { sumDays, seriesOf, categoryStats } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog } from './db.js';
+import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows } from './db.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
@@ -226,6 +226,25 @@ async function handleSummary(req, env) {
   return new Response(text, { headers: { 'content-type': 'application/json' } });
 }
 
+/* ---------- /api/basket: تحليل سلة المشتريات للفترة (من جدول basket_day) ---------- */
+async function handleBasket(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  const q = new URL(req.url).searchParams;
+  if (!validRange(q)) return json({ error: 'bad range' }, 400);
+  let from = q.get('from'), to = q.get('to');
+  if (from > to) [from, to] = [to, from];
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
+  if (days > 800) return json({ error: 'range too long' }, 400);
+  const ttl = to < riyadhDay(Date.now()) ? 600e3 : 60e3;
+  const text = await memo(`basket:${ctx.merchant}:${from}:${to}`, ttl, async () => {
+    await ensureSchema(env.DB);
+    const rows = await basketRows(env.DB, ctx.merchant, from, to);
+    return JSON.stringify({ ...sumBaskets(rows, 10), daysLoaded: rows.length, days });
+  });
+  return new Response(text, { headers: { 'content-type': 'application/json' } });
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -326,6 +345,7 @@ export default {
       if (pathname === '/webhook' && req.method === 'POST') return await handleWebhook(req, env);
       if (pathname === '/api/summary' && req.method === 'GET') return await handleSummary(req, env);
       if (pathname === '/api/share' && ['GET', 'POST', 'DELETE'].includes(req.method)) return await handleShare(req, env);
+      if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
       if (pathname === '/api/coupons' && req.method === 'GET') return await handleCoupons(req, env);

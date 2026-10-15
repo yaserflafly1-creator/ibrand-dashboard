@@ -252,3 +252,19 @@ test('categories: falls back to the full products format when the light format r
   assert.deepEqual((await readCatalog(env.DB, 'm1')).map((x) => x.cat).sort(), ['أحذية', 'فساتين']);
   assert.ok(seen.includes('light') && seen.includes('full'));
 });
+
+test('basket aggregates are stored with orders and re-fetched for days that lack them', async () => {
+  clearPriceCache();
+  const env = setup({ INVENTORY_SYNC: 'off', BACKFILL_DAYS: '6' });
+  const get = fakeSalla({ perDay: 4 });
+  let t = NOW;
+  for (let i = 0; i < 40; i++, t += 60000) if ((await syncMerchant(env, 'm1', { get }, t)).backfillDone) break;
+  const { basketRows } = await import('../src/db.js');
+  assert.equal((await basketRows(env.DB, 'm1', addDays(TODAY, -6), TODAY)).length, 7);
+  await env.DB.prepare('DELETE FROM basket_day WHERE merchant = ?').bind('m1').run();            // أيام قديمة بلا تحليل سلة
+  const st = await getMeta(env.DB, 'm1', 'state', {});
+  const { setMeta } = await import('../src/db.js');
+  await setMeta(env.DB, 'm1', 'state', { ...st, gapPtr: null, gapLo: null, backfillDone: false });
+  for (let i = 0; i < 40; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  assert.equal((await basketRows(env.DB, 'm1', addDays(TODAY, -6), TODAY)).length, 7);        // أُعيد جلبها تلقائياً
+});
