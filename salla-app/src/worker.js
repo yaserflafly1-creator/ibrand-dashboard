@@ -212,7 +212,7 @@ async function handleSummary(req, env) {
     });
     const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
     const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
-    const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true,
+    const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true, catalogSize: cat.size, categorized: cat.cats.size, fmt: state.catFmt || 'light',
       list: catCur.list.map((c) => ({ ...c, prevTotal: prevByName.get(c.name) ?? 0 })) };
     const out = {
       cur: sumDays(curRows, true, cat.vat), prev: sumDays(prevRows, false, cat.vat), series: seriesOf(curRows), campaigns, categories,

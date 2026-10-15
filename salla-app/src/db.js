@@ -13,6 +13,7 @@ export async function ensureSchema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS catalog (merchant TEXT NOT NULL, name TEXT NOT NULL, price REAL NOT NULL, img TEXT NOT NULL DEFAULT '', cat TEXT NOT NULL DEFAULT '', PRIMARY KEY (merchant, name))"),
     db.prepare('CREATE TABLE IF NOT EXISTS cust_day (merchant TEXT NOT NULL, cid TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (merchant, cid, day))'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_cust_day ON cust_day (merchant, day)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS basket_day (merchant TEXT NOT NULL, day TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (merchant, day))'),
     db.prepare('CREATE TABLE IF NOT EXISTS cust_first (merchant TEXT NOT NULL, cid TEXT NOT NULL, first_day TEXT NOT NULL, PRIMARY KEY (merchant, cid))'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_cust_first ON cust_first (merchant, first_day)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_attr_pending ON order_attr (merchant, att, day)'),
@@ -57,8 +58,15 @@ export async function rangeRows(db, m, from, to) {
 
 // الأيام المخزّنة فعلاً (حتى الأيام بلا طلبات تُكتب صفاً فارغاً) لاكتشاف الفجوات
 export async function loadedDays(db, m, from, to) {
-  const { results } = await db.prepare('SELECT day FROM day_agg WHERE merchant = ? AND day BETWEEN ? AND ?').bind(m, from, to).all();
+  // اليوم «محمَّل» إن وُجد ملخصه وتحليل سلته معاً (فيُعاد جلب أيام سابقة لإضافة ميزة جديدة تلقائياً)
+  const { results } = await db.prepare('SELECT d.day AS day FROM day_agg d JOIN basket_day b ON b.merchant = d.merchant AND b.day = d.day WHERE d.merchant = ? AND d.day BETWEEN ? AND ?').bind(m, from, to).all();
   return results.map((r) => r.day);
+}
+export const upsertBaskets = (db, m, rows) => batched(db, rows.map((b) =>
+  db.prepare('INSERT INTO basket_day (merchant, day, data) VALUES (?, ?, ?) ON CONFLICT(merchant, day) DO UPDATE SET data = excluded.data').bind(m, b.day, JSON.stringify(b))));
+export async function basketRows(db, m, from, to) {
+  const { results } = await db.prepare('SELECT data FROM basket_day WHERE merchant = ? AND day BETWEEN ? AND ? ORDER BY day').bind(m, from, to).all();
+  return results.map((r) => JSON.parse(r.data));
 }
 export async function coverage(db, m) {
   const r = await db.prepare('SELECT MIN(day) AS oldest, MAX(day) AS newest FROM day_agg WHERE merchant = ?').bind(m).first();

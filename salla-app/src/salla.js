@@ -63,7 +63,7 @@ export function buildPriceMap(products) {
     if (!p?.name) continue;
     const sale = Number(p.sale_price?.amount) || 0;
     const price = sale > 0 ? sale : Number(p.price?.amount) || 0;
-    if (price > 0) map.set(String(p.name).trim().toLowerCase(), { price, img: p.thumbnail || p.image?.url || '', cat: String(p.category?.name || '').trim(), taxable: p.is_taxable !== false });
+    if (price > 0) map.set(String(p.name).trim().toLowerCase(), { price, img: p.thumbnail || p.image?.url || '', cat: String(p.category?.name || p.categories?.[0]?.name || '').trim(), taxable: p.is_taxable !== false });
   }
   return map;
 }

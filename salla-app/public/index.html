@@ -867,7 +867,7 @@ function renderCategories(cur){
   $('#catSub').textContent = `${fmt(C.list.length)} تصنيف · مبيعات المنتجات شامل الضريبة وبدون الشحن`;
   $('#catMore').hidden = C.list.length <= 12; $('#catMore').textContent = catAll ? 'عرض أقل' : `عرض الكل (${fmt(C.list.length)})`;
   const un = C.list.find(c => !c.name);
-  $('#catNote').textContent = LIVE && !C.mapped ? 'تصنيفات المنتجات قيد التحميل من سلة…' : (un && un.share > 5 ? `${un.share.toFixed(1)}% من المبيعات لمنتجات بلا تصنيف في سلة` : '');
+  $('#catNote').textContent = LIVE && !C.mapped ? `تصنيفات المنتجات قيد التحميل من سلة… (الكتالوج: ${fmt(C.catalogSize||0)} منتج، المصنّف: ${fmt(C.categorized||0)}${C.fmt==='full'?' · الصيغة الكاملة':''})` : (un && un.share > 5 ? `${un.share.toFixed(1)}% من المبيعات لمنتجات بلا تصنيف في سلة` : '');
 }
 document.addEventListener('click', e => { if(e.target.closest('#catMore')){ catAll = !catAll; if(state.view) renderCategories(state.view.cur); } });
 

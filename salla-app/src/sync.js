@@ -1,8 +1,8 @@
 // مزامنة الخلفية (Cron): تجلب الطلبات من سلة على دفعات صغيرة وتحفظ ملخصات يومية في D1.
 // نحترم قيود سلة (30 طلباً في الصفحة، صفحات متسلسلة) وحد نداءات Cloudflare لكل تشغيل (SYNC_BUDGET).
 import { normalizeOrder, normalizeInventoryItem, normalizeAttribution, buildPriceMap } from './salla.js';
-import { emptyDay, addOrder, roundDay } from './agg.js';
-import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, initCustFirst, seedCatalog, dropDaysBefore, setDbHook, loadedDays, upsertOrderRows, pendingAttr, setAttr } from './db.js';
+import { emptyDay, addOrder, roundDay, emptyBasket, addBasket, roundBasket, VALID } from './agg.js';
+import { ensureSchema, getMeta, setMeta, upsertDays, upsertInventory, dropOldInventory, readInventory, upsertPrices, readPrices, upsertCatalog, readCatalog, upsertCustDays, initCustFirst, seedCatalog, dropDaysBefore, setDbHook, loadedDays, upsertBaskets, upsertOrderRows, pendingAttr, setAttr } from './db.js';
 
 const DAY = 864e5;
 const SCHEMA = 5;   // 5: جدول العملاء من الطلبات (تُعاد مزامنة الأرشيف مرة واحدة)
@@ -60,7 +60,8 @@ async function syncOrdersRange(ctx, a, b) {
   // نوسّع النطاق يوماً من كل جهة (دلالة from_date/to_date غير محسومة) ثم نصفّي بتاريخ الطلب نفسه؛ وإن أثبت الفحص (probeDateMode) دقة التصفية نجلب النطاق نفسه فقط (أرخص بكثير للأيام الثقيلة)
   const from = ctx.dateExact ? a : addDays(a, -1), to = ctx.dateExact ? b : addDays(b, 1);
   const days = new Map();
-  for (let d = a; d <= b; d = addDays(d, 1)) days.set(d, emptyDay(d));
+  const baskets = new Map();
+  for (let d = a; d <= b; d = addDays(d, 1)) { days.set(d, emptyDay(d)); baskets.set(d, emptyBasket(d)); }
   let pages = 0;
   const attrRows = [], custRows = [];
   for (let page = 1; ; page++) {
@@ -74,12 +75,14 @@ async function syncOrdersRange(ctx, a, b) {
       priceLines(o, ctx.prices);
       if (o.currency) ctx.currency = o.currency;
       addOrder(days.get(o.day), o);
+      if (VALID(o.status)) addBasket(baskets.get(o.day), o);
       if (o.customerId != null && o.day >= ctx.custFloor && (o.status === 'completed' || o.status === 'shipping')) custRows.push([o.customerId, o.day]);   // إحصاءات العملاء لآخر CUST_DAYS يوماً فقط (حد كتابة D1 اليومي)
       if (o.day >= ctx.attrFloor && o.sallaId != null) attrRows.push({ id: o.sallaId, day: o.day, status: o.status, total: o.total });
     }
     if (page >= (j.pagination?.totalPages ?? 1)) break;
   }
   await upsertDays(ctx.db, ctx.merchant, [...days.values()].map(roundDay));
+  await upsertBaskets(ctx.db, ctx.merchant, [...baskets.values()].map((x) => roundBasket(x)));
   if (attrRows.length) await upsertOrderRows(ctx.db, ctx.merchant, attrRows);
   // إحصاءات العملاء ثانوية: فشل كتابتها لا يُسقط مزامنة الطلبات
   if (custRows.length) { try { await upsertCustDays(ctx.db, ctx.merchant, custRows); } catch (e) { ctx.custError = String(e.message || e).slice(0, 120); } }
@@ -153,10 +156,17 @@ async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
   let page = state.catPage || 1;
   const cap = Math.min(ctx.budget, ctx.used + maxCalls);
   while (ctx.used < cap) {
-    const j = await ctx.get('/products', { format: 'light', page, per_page: 30 });
-    await upsertCatalog(ctx.db, ctx.merchant, buildPriceMap(j.data));
+    // الصيغة المختصرة (light) تحمل category؛ إن لم تُرجع تصنيفاً لأي منتج نعيد الجلب بالصيغة الكاملة (categories)
+    const params = { page, per_page: 30 };
+    if (state.catFmt !== 'full') params.format = 'light';
+    const j = await ctx.get('/products', params);
+    const map = buildPriceMap(j.data);
+    for (const v of map.values()) if (v.cat) state.catSeen = (state.catSeen || 0) + 1;
+    await upsertCatalog(ctx.db, ctx.merchant, map);
     if (page >= (j.pagination?.totalPages ?? 1)) {
       state.catPage = 1; state.catDoneOnce = true; state.catFull = state.catVer || 1; state.catNextAt = now + 6 * 3600e3;
+      if (!state.catSeen && state.catFmt !== 'full') { state.catFmt = 'full'; state.catNextAt = 0; state.catFull = 0; }   // لم يصل أي تصنيف بالصيغة المختصرة: نجرّب الكاملة فوراً
+      state.catSeen = 0;
       clearPriceCache(); await catalogBlob(ctx.kv, ctx.db, ctx.merchant, true); ctx.prices = await priceMap(ctx.db, ctx.merchant, ctx.kv);
       return true;
     }

@@ -230,3 +230,25 @@ test('migration: catalog seeded from legacy prices; one-time reprice drops older
   for (let i = 0; i < 60; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
   assert.equal((await rangeRows(env.DB, 'm1', addDays(TODAY, -45), TODAY)).length, 46);  // وأُعيد جلبها
 });
+
+test('categories: falls back to the full products format when the light format returns none', async () => {
+  clearPriceCache();
+  const env = setup({ CATALOG_SYNC: 'on', INVENTORY_SYNC: 'off', BACKFILL_DAYS: '3' });
+  const base = fakeSalla({ perDay: 3 });
+  const seen = [];
+  const get = async (path, p) => {
+    if (path === '/products') {
+      seen.push(p.format || 'full');
+      const page = Number(p.page || 1);
+      const row = { id: page, name: page === 1 ? 'Dress' : 'Shoe', price: { amount: 80 }, thumbnail: 't.png' };
+      if (!p.format) row.categories = [{ id: 1, name: page === 1 ? 'فساتين' : 'أحذية' }];   // الصيغة الكاملة فقط تحمل categories
+      return { data: [row], pagination: { totalPages: 2 } };
+    }
+    return base(path, p);
+  };
+  let t = NOW;
+  for (let i = 0; i < 10; i++, t += 60000) await syncMerchant(env, 'm1', { get }, t);
+  const { readCatalog } = await import('../src/db.js');
+  assert.deepEqual((await readCatalog(env.DB, 'm1')).map((x) => x.cat).sort(), ['أحذية', 'فساتين']);
+  assert.ok(seen.includes('light') && seen.includes('full'));
+});
