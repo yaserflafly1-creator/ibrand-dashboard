@@ -57,6 +57,7 @@ button{cursor:pointer}
 .range[hidden]{display:none}
 #rangeBtn{cursor:pointer;font-weight:600}
 #cnlKind{display:none}
+#top{max-height:560px;overflow-y:auto;padding-inline-end:4px}
 .bsk-grid td{white-space:normal}
 .bsk-grid .share{display:flex;align-items:center;gap:8px}
 .bsk-grid .share i{display:block;flex:none;height:8px;border-radius:99px;background:linear-gradient(90deg,var(--pink-400),var(--pink-600))}
@@ -345,7 +346,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
       </div>
     </div>
     <div class="card panel">
-      <div class="panel-h"><div><h2>الأكثر مبيعاً</h2><p>أسرع 5 منتجات حركة</p></div></div>
+      <div class="panel-h"><div><h2>الأكثر مبيعاً</h2><p>أسرع 20 منتجاً حركة · بالكمية المباعة</p></div></div>
       <ul class="top-list" id="top"></ul>
     </div>
   </section>
@@ -657,7 +658,7 @@ function aggregate(from, to){
       return {total:tot, units:un, mapped:true, list:Object.values(cm).map(c => ({...c, avg:c.qty?c.total/c.qty:0, share:tot?c.total/tot*100:0, prevTotal:0})).sort((a,b)=>b.total-a.total)};
     })(),
     pay: bucket(o => o.pay), city: bucket(o => o.city), src: bucket(o => o.src),
-    hours, dow, products, productsCount: products.length, top: products.slice(0,5), lostDetail,
+    hours, dow, products, productsCount: products.length, top: products.slice(0,20), lostDetail,
     campaigns: (() => {
       const sm = {}, cm = {};
       valid.forEach(o => { const u = o.utm || {s:'',c:''}; const a = sm[u.s] || (sm[u.s] = {k:u.s, orders:0, total:0}); a.orders++; a.total += o.total;

@@ -123,7 +123,7 @@ export function sumDays(rows, detail = true, vatMap = null) {
   all.sort((x, y) => y.qty - x.qty);
   a.productsCount = all.length;
   a.products = all.slice(0, MAX_PRODUCTS).map((p) => ({ ...p, share: (p.total / sumTotal) * 100 }));
-  a.top = a.products.slice(0, 5);
+  a.top = a.products.slice(0, 20);
   Object.assign(a, { pay: toList(pay), city: toList(city), src: toList(src), hours, dow });
   a.lostDetail = {};
   for (const kind of ['canceled', 'refunded']) {

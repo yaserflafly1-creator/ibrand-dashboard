@@ -96,3 +96,13 @@ test('basket analysis: size histograms, averages and frequently-bought-together 
   assert.deepEqual([s.pairs[0].a, s.pairs[0].b, s.pairs[0].orders], ['A', 'B', 3]);   // A+B في 3 طلبات
   assert.equal(Math.round(s.pairs[0].support), 75);
 });
+
+test('sumDays: top list holds the 20 best-selling products', async () => {
+  const d = emptyDay('2026-10-10');
+  for (let i = 0; i < 30; i++) addOrder(d, { status: 'completed', total: 10, paymentMethod: 'mada', city: 'x', source: 's', hour: 1, qty: 1 + i, customerId: i,
+    lines: [{ name: 'P' + i, qty: 1 + i, price: 10, img: '' }] });
+  const s = sumDays([roundDay(d)]);
+  assert.equal(s.top.length, 20);
+  assert.equal(s.top[0].name, 'P29');
+  assert.equal(s.products.length, 30);
+});
