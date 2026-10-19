@@ -59,7 +59,7 @@ export async function rangeRows(db, m, from, to) {
 // الأيام المخزّنة فعلاً (حتى الأيام بلا طلبات تُكتب صفاً فارغاً) لاكتشاف الفجوات
 export async function loadedDays(db, m, from, to) {
   // اليوم «محمَّل» إن وُجد ملخصه وتحليل سلته معاً (فيُعاد جلب أيام سابقة لإضافة ميزة جديدة تلقائياً)
-  const { results } = await db.prepare('SELECT d.day AS day FROM day_agg d JOIN basket_day b ON b.merchant = d.merchant AND b.day = d.day WHERE d.merchant = ? AND d.day BETWEEN ? AND ?').bind(m, from, to).all();
+  const { results } = await db.prepare(`SELECT d.day AS day FROM day_agg d JOIN basket_day b ON b.merchant = d.merchant AND b.day = d.day WHERE d.merchant = ? AND d.day BETWEEN ? AND ? AND json_extract(b.data, '$.v') >= 2`).bind(m, from, to).all();
   return results.map((r) => r.day);
 }
 export const upsertBaskets = (db, m, rows) => batched(db, rows.map((b) =>

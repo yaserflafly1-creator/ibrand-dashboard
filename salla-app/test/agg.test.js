@@ -106,3 +106,17 @@ test('sumDays: top list holds the 20 best-selling products', async () => {
   assert.equal(s.top[0].name, 'P29');
   assert.equal(s.products.length, 30);
 });
+
+test('basket: category pairs bought together (sparse product pairs, denser category pairs)', async () => {
+  const { emptyBasket, addBasket, roundBasket, sumBaskets } = await import('../src/agg.js');
+  const cat = { A1: 'حفاضات', A2: 'حفاضات', B1: 'مناديل', C1: 'حليب' };
+  const b = emptyBasket('2026-10-10');
+  const mk = (names) => ({ total: 100, lines: names.map((name) => ({ name, qty: 1, price: 1, img: '' })) });
+  addBasket(b, mk(['A1', 'B1']), (n) => cat[n]);
+  addBasket(b, mk(['A2', 'B1']), (n) => cat[n]);       // منتج مختلف لكن التصنيفان نفسهما
+  addBasket(b, mk(['A1', 'C1']), (n) => cat[n]);
+  const s = sumBaskets([roundBasket(b)]);
+  assert.deepEqual([s.cpairs[0].a, s.cpairs[0].b, s.cpairs[0].orders], ['حفاضات', 'مناديل', 2]);
+  assert.equal(s.pairs[0].orders, 1);                  // أزواج المنتجات متفرقة (كل زوج مرة)
+  assert.equal(b.v, 2);
+});

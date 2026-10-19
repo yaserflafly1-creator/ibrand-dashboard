@@ -360,8 +360,8 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
         <div class="tbl-wrap"><table><thead><tr><th>حجم السلة</th><th>الطلبات</th><th>النسبة</th><th>متوسط قيمة الطلب</th></tr></thead><tbody id="bskRows"></tbody></table></div>
       </div>
       <div>
-        <h2 style="font-size:.95rem;margin-bottom:10px">منتجات تُشترى معاً</h2>
-        <div class="tbl-wrap"><table><thead><tr><th>المنتجان</th><th>طلبات مشتركة</th><th>% من الطلبات</th></tr></thead><tbody id="bskPairs"></tbody></table></div>
+        <div class="seg" id="bskPairMode" role="group" aria-label="نوع الأزواج" style="margin-bottom:10px"><button data-m="cats" class="on">تصنيفات تُشترى معاً</button><button data-m="prods">منتجات تُشترى معاً</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th id="bskPairHead">التصنيفان</th><th>طلبات مشتركة</th><th>% من الطلبات</th></tr></thead><tbody id="bskPairs"></tbody></table></div>
       </div>
     </div>
     <p class="period-note" id="bskInsight" style="margin:12px 0 0"></p>
@@ -872,26 +872,29 @@ $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProdu
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
 /* ============ تحليل سلة المشتريات ============ */
-let bskMode = 'units', bskSeq = 0, bskData = null;
+let bskMode = 'units', bskPairMode = 'cats', bskSeq = 0, bskData = null;
 function demoBasket(from, to){
   // من طلبات الوضع التجريبي: نبني نفس شكل استجابة الخادم
   const a = from.getTime(), b = endOfDay(to).getTime(), rows = {};
   ORDERS.filter(o => o.ts>=a && o.ts<=b && VALID(o)).forEach(o => {
     const names = [...new Set(o.lines.map(([pi]) => PRODUCTS[pi].n))], units = o.lines.reduce((x,[,q]) => x+q, 0);
-    const r = rows.v || (rows.v = {n:0, units:0, value:0, lineSum:0, u:{}, l:{}, pairs:{}});
+    const r = rows.v || (rows.v = {n:0, units:0, value:0, lineSum:0, u:{}, l:{}, pairs:{}, cp:{}});
     r.n++; r.units += units; r.value += o.total; r.lineSum += names.length;
     const bump = (m,k) => { const e = m[k] || (m[k] = [0,0]); e[0]++; e[1] += o.total; };
     bump(r.u, String(Math.min(units,6))); bump(r.l, String(Math.min(names.length,4)));
     const top = names.slice().sort();
     for(let i=0;i<top.length;i++) for(let j=i+1;j<top.length;j++){ const k = top[i]+'\u001f'+top[j]; r.pairs[k] = (r.pairs[k]||0)+1; }
+    const cats = [...new Set(names.map(n => DEMO_CAT[n]).filter(Boolean))].sort();
+    for(let i=0;i<cats.length;i++) for(let j=i+1;j<cats.length;j++){ const k = cats[i]+'\u001f'+cats[j]; r.cp[k] = (r.cp[k]||0)+1; }
   });
-  const r = rows.v || {n:0, units:0, value:0, lineSum:0, u:{}, l:{}, pairs:{}}, n = r.n || 1;
+  const r = rows.v || {n:0, units:0, value:0, lineSum:0, u:{}, l:{}, pairs:{}, cp:{}}, n = r.n || 1;
   const hist = (m, keys, label) => keys.map(k => ({k, label:label(k), orders:(m[k]||[0,0])[0], share:(m[k]||[0,0])[0]/n*100, avgValue:(m[k]||[0,0])[0] ? (m[k][1]/m[k][0]) : 0}));
   return {orders:r.n, units:r.units, avgUnits:r.n ? r.units/r.n : 0, avgLines:r.n ? r.lineSum/r.n : 0, avgValue:r.n ? r.value/r.n : 0,
     units_hist:hist(r.u, ['1','2','3','4','5','6'], k => k==='6' ? '6 قطع فأكثر' : k+(k==='1'?' قطعة':' قطع')),
     lines_hist:hist(r.l, ['1','2','3','4'], k => k==='4' ? '4 منتجات فأكثر' : k+(k==='1'?' منتج':' منتجات')),
     singleShare:(r.u['1']||[0])[0]/n*100, multiShare:((r.l['2']||[0])[0]+(r.l['3']||[0])[0]+(r.l['4']||[0])[0])/n*100,
     pairs:Object.entries(r.pairs).sort((x,y)=>y[1]-x[1]).slice(0,10).map(([k,c]) => { const [p1,p2] = k.split('\u001f'); return {a:p1, b:p2, orders:c, support:c/n*100}; }),
+    cpairs:Object.entries(r.cp).sort((x,y)=>y[1]-x[1]).slice(0,10).map(([k,c]) => { const [p1,p2] = k.split('\u001f'); return {a:p1, b:p2, orders:c, support:c/n*100}; }),
     daysLoaded:null, days:null};
 }
 async function loadBasket(from, to){
@@ -916,17 +919,22 @@ function renderBasket(){
   const hist = bskMode==='units' ? B.units_hist : B.lines_hist, max = Math.max(...hist.map(h => h.share)) || 1;
   $('#bskRows').innerHTML = hist.map(h => `<tr><td><b>${esc(h.label)}</b></td><td>${fmt(h.orders)}</td>
     <td><div class="share"><i style="width:${Math.max(3, Math.round(h.share/max*110))}px"></i><b>${h.share.toFixed(1)}%</b></div></td><td>${h.orders ? money(h.avgValue)+' '+CURRENCY : '—'}</td></tr>`).join('');
-  $('#bskPairs').innerHTML = B.pairs.length ? B.pairs.map(p => `<tr><td><div class="bsk-pair"><span>${esc(p.a)}</span><small>+ ${esc(p.b)}</small></div></td><td>${fmt(p.orders)}</td><td><b>${p.support.toFixed(1)}%</b></td></tr>`).join('')
-    : '<tr><td colspan="3" class="empty">لا توجد سلال متعددة المنتجات في هذه الفترة</td></tr>';
+  const PL = bskPairMode==='cats' ? (B.cpairs||[]) : B.pairs;
+  $('#bskPairHead').textContent = bskPairMode==='cats' ? 'التصنيفان' : 'المنتجان';
+  $('#bskPairs').innerHTML = PL.length ? PL.map(p => `<tr><td><div class="bsk-pair"><span>${esc(p.a)}</span><small>+ ${esc(p.b)}</small></div></td><td>${fmt(p.orders)}</td><td><b>${p.support.toFixed(1)}%</b></td></tr>`).join('')
+    : `<tr><td colspan="3" class="empty">${bskPairMode==='cats' ? 'لا توجد أزواج تصنيفات بعد (تُبنى أثناء تحميل الأرشيف)' : 'لا توجد سلال متعددة المنتجات في هذه الفترة'}</td></tr>`;
   // خلاصة سلوكية
   const parts = [];
   parts.push(`${B.singleShare.toFixed(0)}% من الطلبات بقطعة واحدة، و${B.multiShare.toFixed(0)}% تضم أكثر من منتج مختلف`);
-  const top = B.pairs[0]; if(top) parts.push(`أكثر زوج يُشترى معاً: «${top.a}» مع «${top.b}» (${fmt(top.orders)} طلباً)`);
+  const ct = (B.cpairs||[])[0], top = B.pairs[0];
+  if(ct) parts.push(`أكثر تصنيفين يُشتريان معاً: «${ct.a}» مع «${ct.b}» (${ct.support.toFixed(1)}% من الطلبات)`);
+  else if(top) parts.push(`أكثر زوج يُشترى معاً: «${top.a}» مع «${top.b}» (${fmt(top.orders)} طلباً)`);
   const big = B.units_hist.filter(h => ['3','4','5','6'].includes(h.k)), bigShare = big.reduce((x,h) => x+h.share, 0);
   if(bigShare) parts.push(`${bigShare.toFixed(0)}% من الطلبات 3 قطع فأكثر`);
   if(B.days && B.daysLoaded < B.days) parts.push(`تحليل السلة مُحمَّل لـ ${fmt(B.daysLoaded)} من ${fmt(B.days)} يوماً في هذه الفترة، ويكتمل تدريجياً`);
   $('#bskInsight').textContent = parts.join(' · ');
 }
+document.querySelectorAll('#bskPairMode button').forEach(b => b.addEventListener('click', () => { bskPairMode = b.dataset.m; document.querySelectorAll('#bskPairMode button').forEach(x => x.classList.toggle('on', x===b)); renderBasket(); }));
 document.querySelectorAll('#bskMode button').forEach(b => b.addEventListener('click', () => { bskMode = b.dataset.m; document.querySelectorAll('#bskMode button').forEach(x => x.classList.toggle('on', x===b)); renderBasket(); }));
 
 let catAll = false;
@@ -1457,6 +1465,7 @@ function exportReport(){
     H(['المؤشر','القيمة']), ['متوسط القطع في الطلب', M(bskData.avgUnits)], ['متوسط المنتجات المختلفة', M(bskData.avgLines)], ['متوسط قيمة الطلب ('+CURRENCY+')', M(bskData.avgValue)], ['طلبات بقطعة واحدة %', P(bskData.singleShare)], [],
     H(['حجم السلة (عدد القطع)','الطلبات','النسبة','متوسط قيمة الطلب']), ...bskData.units_hist.map(h => [h.label, I(h.orders), P(h.share), M(h.avgValue)]), [],
     H(['حجم السلة (عدد المنتجات)','الطلبات','النسبة','متوسط قيمة الطلب']), ...bskData.lines_hist.map(h => [h.label, I(h.orders), P(h.share), M(h.avgValue)]), [],
+    H(['تصنيفات تُشترى معاً','طلبات مشتركة','% من الطلبات']), ...(bskData.cpairs||[]).map(x => [x.a+' + '+x.b, I(x.orders), P(x.support)]), [],
     H(['منتجات تُشترى معاً','طلبات مشتركة','% من الطلبات']), ...bskData.pairs.map(x => [x.a+' + '+x.b, I(x.orders), P(x.support)])]});
   const lost = k => { const L = c.lostDetail && c.lostDetail[k]; if(!L) return []; const t = k==='canceled' ? 'الملغية' : 'المسترجعة';
     return [[{v:'الطلبات '+t, s:2}], H(['عدد الطلبات','القيمة','النسبة من الطلبات','متوسط القيمة']), [I(L.count), M(L.value), P(L.rate), M(L.avg)], [],

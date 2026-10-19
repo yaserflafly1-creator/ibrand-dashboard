@@ -145,8 +145,8 @@ export const seriesOf = (rows) => rows.map((d) => [d.day, d.orders, d.revenue, d
    يُجمَّع لكل يوم من طلبات مكتملة/قيد التنفيذ فقط: توزيع حجم السلة بالقطع (1..5 و6+) وبعدد المنتجات المختلفة (1..3 و4+)،
    والأزواج المشتراة معاً (أعلى 40 زوجاً يومياً). يُخزَّن في جدول مستقل كي لا يثقل ملخص اليوم. */
 const bump2 = (m, k, v) => { const e = m[k] || (m[k] = [0, 0]); e[0]++; e[1] += v; };
-export const emptyBasket = (day) => ({ day, n: 0, units: 0, value: 0, lineSum: 0, u: {}, l: {}, pairs: {} });
-export function addBasket(b, o) {
+export const emptyBasket = (day) => ({ v: 2, day, n: 0, units: 0, value: 0, lineSum: 0, u: {}, l: {}, pairs: {}, cp: {} });
+export function addBasket(b, o, catOf = null) {
   const lines = (o.lines || []).filter((l) => l.qty > 0);
   if (!lines.length) return;
   const units = lines.reduce((s, l) => s + l.qty, 0);
@@ -158,20 +158,27 @@ export function addBasket(b, o) {
     const top = names.slice(0, 6).sort();
     for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) { const k = top[i] + '\u001f' + top[j]; b.pairs[k] = (b.pairs[k] || 0) + 1; }
   }
+  // أزواج التصنيفات (أقل تبعثراً بكثير من أزواج المنتجات في متجر بآلاف المنتجات)
+  if (catOf) {
+    const cats = [...new Set(names.map((n) => catOf(n)).filter(Boolean))].sort().slice(0, 6);
+    for (let i = 0; i < cats.length; i++) for (let j = i + 1; j < cats.length; j++) { const k = cats[i] + '\u001f' + cats[j]; b.cp[k] = (b.cp[k] || 0) + 1; }
+  }
 }
 export function roundBasket(b, keep = 40) {
   const fix = (m) => { for (const k in m) m[k][1] = r2(m[k][1]); };
   fix(b.u); fix(b.l); b.value = r2(b.value);
   const top = Object.entries(b.pairs).sort((x, y) => y[1] - x[1]).slice(0, keep);
   b.pairs = Object.fromEntries(top);
+  b.cp = Object.fromEntries(Object.entries(b.cp || {}).sort((x, y) => y[1] - x[1]).slice(0, keep));
   return b;
 }
 export function sumBaskets(rows, topPairs = 10) {
-  const a = { orders: 0, units: 0, value: 0, lineSum: 0 }, u = {}, l = {}, pairs = {};
+  const a = { orders: 0, units: 0, value: 0, lineSum: 0 }, u = {}, l = {}, pairs = {}, cp = {};
   for (const d of rows) {
     a.orders += d.n; a.units += d.units; a.value += d.value; a.lineSum += d.lineSum;
     for (const [src, dst] of [[d.u, u], [d.l, l]]) for (const k in src) { const e = dst[k] || (dst[k] = [0, 0]); e[0] += src[k][0]; e[1] += src[k][1]; }
     for (const k in d.pairs) pairs[k] = (pairs[k] || 0) + d.pairs[k];
+    for (const k in d.cp) cp[k] = (cp[k] || 0) + d.cp[k];
   }
   const n = a.orders || 1;
   const hist = (m, keys, label) => keys.map((k) => ({ k, label: label(k), orders: (m[k] || [0, 0])[0], share: ((m[k] || [0, 0])[0] / n) * 100, avgValue: (m[k] || [0, 0])[0] ? r2(m[k][1] / m[k][0]) : 0 }));
@@ -184,6 +191,7 @@ export function sumBaskets(rows, topPairs = 10) {
     lines_hist: hist(l, ['1', '2', '3', '4'], (k) => (k === '4' ? '4 منتجات فأكثر' : k + (k === '1' ? ' منتج' : ' منتجات'))),
     singleShare: ((u['1'] || [0])[0] / n) * 100,
     multiShare: ((l['2'] || [0])[0] + (l['3'] || [0])[0] + (l['4'] || [0])[0]) / n * 100,
-    pairs: top
+    pairs: top,
+    cpairs: Object.entries(cp).sort((x, y) => y[1] - x[1]).slice(0, topPairs).map(([k, c]) => { const [p1, p2] = k.split('\u001f'); return { a: p1, b: p2, orders: c, support: (c / n) * 100 }; })
   };
 }

@@ -75,7 +75,7 @@ async function syncOrdersRange(ctx, a, b) {
       priceLines(o, ctx.prices);
       if (o.currency) ctx.currency = o.currency;
       addOrder(days.get(o.day), o);
-      if (VALID(o.status)) addBasket(baskets.get(o.day), o);
+      if (VALID(o.status)) addBasket(baskets.get(o.day), o, (n) => ctx.prices.get(String(n).trim().toLowerCase())?.cat || '');
       if (o.customerId != null && o.day >= ctx.custFloor && (o.status === 'completed' || o.status === 'shipping')) custRows.push([o.customerId, o.day]);   // إحصاءات العملاء لآخر CUST_DAYS يوماً فقط (حد كتابة D1 اليومي)
       if (o.day >= ctx.attrFloor && o.sallaId != null) attrRows.push({ id: o.sallaId, day: o.day, status: o.status, total: o.total });
     }
