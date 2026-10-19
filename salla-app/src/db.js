@@ -111,7 +111,8 @@ export async function customerTotal(db, m) {
 
 /* كتالوج المنتجات (اسم -> سعر + صورة + تصنيف) من قائمة المنتجات؛ دفعة واحدة لكل صفحة */
 export const upsertCatalog = (db, m, map) => multiInsert(db, 'INSERT INTO catalog (merchant, name, price, img, cat, taxable)',
-  'ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img, cat = excluded.cat, taxable = excluded.taxable',
+  // لا نكتب إن لم يتغير شيء (تحديث الكتالوج يعيد كل المنتجات؛ حد الكتابة اليومي)
+  'ON CONFLICT(merchant, name) DO UPDATE SET price = excluded.price, img = excluded.img, cat = excluded.cat, taxable = excluded.taxable WHERE catalog.price != excluded.price OR catalog.img != excluded.img OR catalog.cat != excluded.cat OR catalog.taxable != excluded.taxable',
   [...map].map(([name, v]) => [m, name, v.price, v.img || '', v.cat || '', v.taxable === false ? 0 : 1]), 6);
 export async function readCatalog(db, m) {
   const { results } = await db.prepare('SELECT name, price, img, cat, taxable FROM catalog WHERE merchant = ?').bind(m).all();

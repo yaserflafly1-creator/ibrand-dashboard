@@ -164,7 +164,7 @@ async function catalogChunk(ctx, state, now, maxCalls = Infinity) {
     for (const v of map.values()) if (v.cat) state.catSeen = (state.catSeen || 0) + 1;
     await upsertCatalog(ctx.db, ctx.merchant, map);
     if (page >= (j.pagination?.totalPages ?? 1)) {
-      state.catPage = 1; state.catDoneOnce = true; state.catFull = state.catVer || 1; state.catNextAt = now + 6 * 3600e3;
+      state.catPage = 1; state.catDoneOnce = true; state.catFull = state.catVer || 1; state.catNextAt = now + 12 * 3600e3;
       if (!state.catSeen && state.catFmt !== 'full') { state.catFmt = 'full'; state.catNextAt = 0; state.catFull = 0; }   // لم يصل أي تصنيف بالصيغة المختصرة: نجرّب الكاملة فوراً
       state.catSeen = 0;
       clearPriceCache(); await catalogBlob(ctx.kv, ctx.db, ctx.merchant, true); ctx.prices = await priceMap(ctx.db, ctx.merchant, ctx.kv);
@@ -194,13 +194,17 @@ async function inventoryChunk(ctx, state, now, maxCalls = Infinity) {
   return false;
 }
 
+const running = new Set();   // منع تداخل دورتين داخل نفس الـ isolate
 export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const db = env.DB;
   await ensureSchema(db);
   const state = await getMeta(db, merchant, 'state', {});
   if (state.lockUntil && state.lockUntil > now) return { skipped: 'locked' };
-  state.lockUntil = now + 55000;
-  await setMeta(db, merchant, 'state', state);
+  // حد الكتابة اليومي في D1 المجاني (100 ألف صف): لا نكتب قفلاً في بداية كل دورة، ولا نحفظ الحالة إن لم تتغير (إلا نبضة كل 5 دقائق لظهور «آخر دورة»)
+  if (running.has(merchant)) return { skipped: 'running' };
+  running.add(merchant);
+  const volatile = (st) => JSON.stringify(st, (k, v) => (['lastRunAt', 'lastLog', 'lastUsed', 'lastSavedAt', 'lockUntil'].includes(k) ? undefined : v));
+  const snapshot = volatile(state);
 
   const ctx = { ...ctxBase, db, merchant, used: 0, budget: Number(env.SYNC_BUDGET) || 40, currency: state.currency };
   const get = ctxBase.get;
@@ -319,8 +323,9 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
     throw e;
   } finally {
     setDbHook(null);
+    running.delete(merchant);
     state.lockUntil = 0;
-    await setMeta(db, merchant, 'state', state);
+    if (volatile(state) !== snapshot || now - (state.lastSavedAt || 0) >= 300000) { state.lastSavedAt = now; await setMeta(db, merchant, 'state', state); }
   }
   return { used: ctx.used, log, backfillDone: !!state.backfillDone };
 }

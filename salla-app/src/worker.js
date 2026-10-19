@@ -203,7 +203,7 @@ async function handleSummary(req, env) {
     const curRows = rows.filter((d) => d.day >= from), prevRows = rows.filter((d) => d.day < from);
     const state = await getMeta(env.DB, ctx.merchant, 'state', {});
     const cov = await coverage(env.DB, ctx.merchant);
-    const campaigns = await memo(`camp:${ctx.merchant}:${from}:${to}`, 600e3, () => campaignStats(env.DB, ctx.merchant, from, to));
+    const campaigns = await memo(`camp:${ctx.merchant}:${from}:${to}`, to < riyadhDay(Date.now()) ? 3 * 3600e3 : 30 * 60e3, () => campaignStats(env.DB, ctx.merchant, from, to));   // يقرأ آلاف الصفوف: تخزين مؤقت أطول (حد القراءة اليومي)
     campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
     // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
     const cat = await memo(`catmap:${ctx.merchant}`, 600e3, async () => {
@@ -316,7 +316,7 @@ async function handleCustomers(req, env) {
   // واجهة /customers في سلة بلا إجمالي (ترقيم cursor)، فالعملاء يُحسبون من الطلبات المحمّلة في D1
   await ensureSchema(env.DB);
   // أرقام العملاء لا تحتاج لحظية: 10 دقائق للفترة، و6 ساعات للعدد الكلي (يقرأ كل الجدول)
-  const body = await memo(`cust:${ctx.merchant}:${from}:${to}`, 600e3, async () => {
+  const body = await memo(`cust:${ctx.merchant}:${from}:${to}`, to < riyadhDay(Date.now()) ? 3 * 3600e3 : 30 * 60e3, async () => {
     const state = await getMeta(env.DB, ctx.merchant, 'state', {});
     const total = await memo(`custtotal:${ctx.merchant}`, 6 * 3600e3, () => customerTotal(env.DB, ctx.merchant));
     return { ...(await customerStats(env.DB, ctx.merchant, from, to)), total, backfillDone: !!state.backfillDone, error: state.custError || '' };
