@@ -16,6 +16,12 @@ export function periodRange(period, today, from, to) {
   const DATE = /^\d{4}-\d{2}-\d{2}$/;
   if (DATE.test(from || '') && DATE.test(to || '')) return from <= to ? { from, to } : { from: to, to: from };
   const add = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  const mAgo = /^month([1-9])$/.exec(period || '');   // month1 = الشهر الماضي، month2 = قبله، …
+  if (mAgo) {
+    const [y, m] = today.slice(0, 7).split('-').map(Number), d = new Date(Date.UTC(y, m - 1 - Number(mAgo[1]), 1));
+    const start = d.toISOString().slice(0, 10), end = add(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 10), -1);
+    return { from: start, to: end };
+  }
   switch (period) {
     case 'today': return { from: today, to: today };
     case 'yesterday': return { from: add(today, -1), to: add(today, -1) };

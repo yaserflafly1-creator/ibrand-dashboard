@@ -183,3 +183,11 @@ test('export.csv orders: per-order date + total only, valid orders by default', 
   assert.ok(t.includes('2026-10-10 09:05,100.5')); assert.ok(!t.includes('40')); assert.ok(!t.includes('سري')); assert.ok(!t.includes('2026-10-09'));
   assert.equal((await call(`/api/export.csv?share=${c.id}&report=orders&period=year`, {}, {})).status, 400);
 });
+
+test('periodRange: monthN = N months ago', async () => {
+  const { periodRange } = await import('../src/export.js');
+  assert.deepEqual(periodRange('month1', '2026-10-21'), { from: '2026-09-01', to: '2026-09-30' });
+  assert.deepEqual(periodRange('month2', '2026-10-21'), { from: '2026-08-01', to: '2026-08-31' });
+  assert.deepEqual(periodRange('month3', '2026-02-10'), { from: '2025-11-01', to: '2025-11-30' });
+  assert.deepEqual(periodRange('lastmonth', '2026-01-05'), { from: '2025-12-01', to: '2025-12-31' });
+});
