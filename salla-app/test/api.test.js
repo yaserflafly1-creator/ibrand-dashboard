@@ -191,3 +191,12 @@ test('periodRange: monthN = N months ago', async () => {
   assert.deepEqual(periodRange('month3', '2026-02-10'), { from: '2025-11-01', to: '2025-11-30' });
   assert.deepEqual(periodRange('lastmonth', '2026-01-05'), { from: '2025-12-01', to: '2025-12-31' });
 });
+
+test('export.csv orders: refuses (400) instead of silently truncating huge ranges', async () => {
+  const env = mkEnv();
+  mockFetch(good, { '/orders': () => ok([], { totalPages: 301 }) });
+  const call = (path, hdr = auth.headers) => worker.fetch(new Request('https://x.test' + path, { headers: hdr }), env);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', headers: auth.headers }), env)).json();
+  const r = await call(`/api/export.csv?share=${c.id}&report=orders&from=2026-10-01&to=2026-10-20`, {});
+  assert.equal(r.status, 400); assert.match(await r.text(), /too many orders/);
+});

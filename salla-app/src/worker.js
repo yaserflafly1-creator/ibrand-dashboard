@@ -193,7 +193,7 @@ const catInfo = (env, merchant) => memo(`catmap:${merchant}`, 600e3, async () =>
 });
 
 /* ---------- /api/export.csv: تقارير إجمالية لجوجل شيت (IMPORTDATA لا يرسل ترويسات، فالرابط يحمل share في الاستعلام) ---------- */
-const ORDERS_EXPORT_MAX_DAYS = 31;
+const ORDERS_EXPORT_MAX_DAYS = 31, ORDERS_EXPORT_MAX_PAGES = 300;
 async function handleExport(req, env) {
   const q = new URL(req.url).searchParams;
   const rec = await shareById(env, q.get('share'));
@@ -223,14 +223,16 @@ async function handleExport(req, env) {
       const fetchPage = (page) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page });
       const first = await fetchPage(1);   // الصفحة الأولى وحدها (تجدّد التوكن إن لزم)، ثم الباقي دفعات متوازية لتفادي مهلة جوجل شيت
       take(first);
-      const pages = Math.min(100, first.pagination?.totalPages || 1);
-      for (let p = 2; p <= pages; p += 6) {
-        const batch = await Promise.all(Array.from({ length: Math.min(6, pages - p + 1) }, (_, k) => fetchPage(p + k)));
+      const pages = first.pagination?.totalPages || 1;
+      if (pages > ORDERS_EXPORT_MAX_PAGES) throw Object.assign(new Error('too many orders: use a shorter range'), { tooMany: true });   // لا نقصّ البيانات بصمت
+      for (let p = 2; p <= pages; p += 8) {
+        const batch = await Promise.all(Array.from({ length: Math.min(8, pages - p + 1) }, (_, k) => fetchPage(p + k)));
         batch.forEach(take);
       }
       rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
       return '\uFEFF' + toCsv([['التاريخ', 'قيمة الطلب'], ...rows]);
-    });
+    }).catch((e) => (e.tooMany ? e : Promise.reject(e)));
+    if (body instanceof Error) return text(body.message, 400);
     return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
   }
   if (span > 800) return text('range too long', 400);
