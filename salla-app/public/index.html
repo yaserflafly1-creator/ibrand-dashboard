@@ -1513,6 +1513,8 @@ async function copyText(text, inputEl){
   return false;
 }
 const waLink = (url, label) => 'https://wa.me/?text=' + encodeURIComponent((label ? 'مرحباً '+label+'، ' : '') + 'هذا رابط لوحة مبيعات المتجر (للقراءة فقط): ' + url);
+const SHEET_REPORTS = [['summary','ملخص'],['daily','يومي'],['products','المنتجات'],['categories','التصنيفات'],['cancelled','الملغية']];
+const sheetBtns = id => `<div style="margin-top:6px;font-size:.78rem"><span style="color:var(--muted)">صيغ جوجل شيت (الشهر الحالي): </span>${SHEET_REPORTS.map(([r,t]) => `<button class="linkbtn" type="button" data-copy="${esc('=IMPORTDATA("'+location.origin+'/api/export.csv?share='+id+'&report='+r+'&period=month")')}">${t}</button>`).join(' · ')}</div>`;
 const shDate = ms => new Date(ms).toLocaleDateString('en-GB');
 async function shareList(){
   const body = $('#shareDlgBody');
@@ -1522,13 +1524,13 @@ async function shareList(){
   body.innerHTML = `<h2 style="margin-bottom:6px">مشاركة اللوحة</h2>
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:12px">رابط للقراءة فقط: يعرض الأرقام والرسوم والمنتجات والمخزون، بدون أسماء العملاء والطلبات. من يملك الرابط يراها دون حساب سلة، فشاركه بحذر.</p>
     <input id="shLabel" type="text" autocomplete="off" maxlength="60" placeholder="اسم الشخص الذي ستشاركه (اختياري)" style="width:100%;padding:8px;border:1px solid #f0cfe0;border-radius:10px;margin-bottom:8px">
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="align-self:center;font-size:.85rem">المدة:</span>${chip(1,'يوم')}${chip(7,'7 أيام')}${chip(30,'30 يوماً')}${chip(90,'90 يوماً')}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span style="align-self:center;font-size:.85rem">المدة:</span>${chip(1,'يوم')}${chip(7,'7 أيام')}${chip(30,'30 يوماً')}${chip(90,'90 يوماً')}${chip(365,'سنة (للشيت)')}</div>
     <button class="btn btn-primary" id="shNew" type="button" style="margin-bottom:14px">إنشاء رابط</button>
-    ${shNewUrl ? `<div style="background:var(--pink-50,#fdf2f8);border:1px solid var(--pink-700,#db2777);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.82rem"><b>تم إنشاء الرابط ✓${shNewLabel ? ' · لـ '+esc(shNewLabel) : ''}</b><input readonly value="${esc(shNewUrl)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()"><button class="btn btn-primary" data-copy="${esc(shNewUrl)}" type="button">نسخ الرابط</button> <a class="btn" href="${esc(waLink(shNewUrl, shNewLabel))}" target="_blank" rel="noopener noreferrer">إرسال عبر واتساب</a></div>` : ''}
+    ${shNewUrl ? `<div style="background:var(--pink-50,#fdf2f8);border:1px solid var(--pink-700,#db2777);border-radius:12px;padding:10px;margin-bottom:12px;font-size:.82rem"><b>تم إنشاء الرابط ✓${shNewLabel ? ' · لـ '+esc(shNewLabel) : ''}</b><input readonly value="${esc(shNewUrl)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()"><button class="btn btn-primary" data-copy="${esc(shNewUrl)}" type="button">نسخ الرابط</button> <a class="btn" href="${esc(waLink(shNewUrl, shNewLabel))}" target="_blank" rel="noopener noreferrer">إرسال عبر واتساب</a>${sheetBtns(shNewUrl.split('=').pop())}</div>` : ''}
     <div id="shList">${list.length ? list.map(x => `<div style="border:1px solid #f0cfe0;border-radius:12px;padding:10px;margin-bottom:8px;font-size:.82rem">
         <div><b>${esc(x.label||'بدون اسم')}</b> · ينتهي ${shDate(x.exp)}</div>
         <input readonly value="${esc(x.url)}" style="width:100%;margin:6px 0;padding:6px;direction:ltr;border:1px solid #f0cfe0;border-radius:8px" onclick="this.select()">
-        <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <a class="linkbtn" href="${esc(waLink(x.url, x.label))}" target="_blank" rel="noopener noreferrer">واتساب</a> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button></div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
+        <button class="linkbtn" data-copy="${esc(x.url)}" type="button">نسخ</button> · <a class="linkbtn" href="${esc(waLink(x.url, x.label))}" target="_blank" rel="noopener noreferrer">واتساب</a> · <button class="linkbtn" data-del="${esc(x.id)}" type="button">إلغاء الرابط</button>${sheetBtns(x.id)}</div>`).join('') : '<p style="color:var(--muted)">لا توجد روابط نشطة</p>'}</div>
     <button class="btn" id="shClose" type="button" style="margin-top:8px">إغلاق</button>`;
   body.querySelectorAll('[data-days]').forEach(b => b.onclick = () => { const l = $('#shLabel').value; shDays = Number(b.dataset.days); shNewUrl = ''; shareList().then(() => { $('#shLabel').value = l; }); });
   $('#shNew').onclick = async () => {

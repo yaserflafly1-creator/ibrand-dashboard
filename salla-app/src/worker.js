@@ -1,6 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows } from './db.js';
+import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
 /* ذاكرة مؤقتة داخل الـ isolate: تخفف النداءات المتكررة دون استهلاك عمليات كتابة KV */
@@ -137,14 +138,17 @@ async function authContext(req, env) {
 }
 
 /* ---------- روابط المشاركة (قراءة فقط): share:<id> → { merchant, label, exp } في KV ---------- */
-const SHARE_MAX_DAYS = 90, SHARE_ID_RE = /^[0-9a-f]{32}$/;
-async function shareFromRequest(req, env) {
-  const m = /^Share ([0-9a-f]{32})$/.exec(req.headers.get('authorization') || '');
-  if (!m) return null;
-  const raw = await env.TOKENS.get(`share:${m[1]}`);
+const SHARE_MAX_DAYS = 365, SHARE_ID_RE = /^[0-9a-f]{32}$/;
+async function shareById(env, id) {
+  if (!SHARE_ID_RE.test(id || '')) return null;
+  const raw = await env.TOKENS.get(`share:${id}`);
   if (!raw) return null;
   const rec = JSON.parse(raw);
   return rec.exp > Date.now() ? rec : null;
+}
+async function shareFromRequest(req, env) {
+  const m = /^Share ([0-9a-f]{32})$/.exec(req.headers.get('authorization') || '');
+  return m ? shareById(env, m[1]) : null;
 }
 // نقاط تقرأ من D1 فقط (ملخص/مخزون): تقبل توكن سلة أو رابط مشاركة؛ الباقي (طلبات/عملاء بأسمائهم) توكن سلة فقط
 async function dataContext(req, env) {
@@ -183,6 +187,30 @@ async function handleShare(req, env) {
   return json({ shares: out.sort((a, b) => b.created - a.created) });
 }
 
+const catInfo = (env, merchant) => memo(`catmap:${merchant}`, 600e3, async () => {
+  const rows2 = await catalogBlob(env.TOKENS, env.DB, merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
+  return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
+});
+
+/* ---------- /api/export.csv: تقارير إجمالية لجوجل شيت (IMPORTDATA لا يرسل ترويسات، فالرابط يحمل share في الاستعلام) ---------- */
+async function handleExport(req, env) {
+  const q = new URL(req.url).searchParams;
+  const rec = await shareById(env, q.get('share'));
+  const text = (s, status = 200) => new Response(s, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+  if (!rec) return text('unauthorized', 401);
+  const report = q.get('report') || 'summary';
+  if (!REPORTS.includes(report)) return text('unknown report: ' + REPORTS.join(', '), 400);
+  const { from, to } = periodRange(q.get('period') || 'month', riyadhDay(Date.now()), q.get('from'), q.get('to'));
+  if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) > 800) return text('range too long', 400);
+  const body = await memo(`csv:${rec.merchant}:${report}:${from}:${to}`, to < riyadhDay(Date.now()) ? 600e3 : 120e3, async () => {
+    await ensureSchema(env.DB);
+    const rows = await rangeRows(env.DB, rec.merchant, from, to);
+    const cat = (report === 'categories' || report === 'products') ? await catInfo(env, rec.merchant) : null;
+    return '\uFEFF' + toCsv(buildReport(report, rows, { catMap: cat?.cats, vatMap: cat?.vat }));
+  });
+  return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
 /* ---------- /api/summary: أرقام الفترة والفترة السابقة من الملخصات اليومية ---------- */
 async function handleSummary(req, env) {
   const ctx = await dataContext(req, env);
@@ -206,10 +234,7 @@ async function handleSummary(req, env) {
     const campaigns = await memo(`camp:${ctx.merchant}:${from}:${to}`, to < riyadhDay(Date.now()) ? 3 * 3600e3 : 30 * 60e3, () => campaignStats(env.DB, ctx.merchant, from, to));   // يقرأ آلاف الصفوف: تخزين مؤقت أطول (حد القراءة اليومي)
     campaigns.since = addDays(riyadhDay(Date.now()), -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
     // التصنيفات والضريبة: تصنيف كل منتج وعامل الضريبة (VAT_RATE، الافتراضي 15%) للمنتجات الخاضعة لها من الكتالوج
-    const cat = await memo(`catmap:${ctx.merchant}`, 600e3, async () => {
-      const rows2 = await catalogBlob(env.TOKENS, env.DB, ctx.merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;
-      return { cats: new Map(rows2.filter((r) => r.cat).map((r) => [r.name, r.cat])), vat: new Map(rows2.filter((r) => r.taxable !== 0).map((r) => [r.name, vat])), size: rows2.length };
-    });
+    const cat = await catInfo(env, ctx.merchant);
     const catCur = categoryStats(curRows, cat.cats, cat.vat), catPrev = categoryStats(prevRows, cat.cats, cat.vat);
     const prevByName = new Map(catPrev.list.map((c) => [c.name, c.total]));
     const categories = { total: catCur.total, units: catCur.units, mapped: cat.cats.size > 0, vat: true, catalogSize: cat.size, categorized: cat.cats.size, fmt: state.catFmt || 'light',
@@ -345,6 +370,7 @@ export default {
       if (pathname === '/webhook' && req.method === 'POST') return await handleWebhook(req, env);
       if (pathname === '/api/summary' && req.method === 'GET') return await handleSummary(req, env);
       if (pathname === '/api/share' && ['GET', 'POST', 'DELETE'].includes(req.method)) return await handleShare(req, env);
+      if (pathname === '/api/export.csv' && req.method === 'GET') return await handleExport(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);

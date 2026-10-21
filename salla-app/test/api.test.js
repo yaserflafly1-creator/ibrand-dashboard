@@ -154,3 +154,19 @@ test('share links: create/list/revoke with embedded token; read-only summary via
   env.TOKENS.m.set('share:' + c2.id, JSON.stringify({ merchant: '346539387', exp: Date.now() - 1 }));
   assert.equal((await call('/api/summary?from=2026-10-10&to=2026-10-10', {}, { authorization: 'Share ' + c2.id })).status, 401);
 });
+
+test('export.csv: share-gated aggregate CSV reports for Google Sheets', async () => {
+  const env = mkEnv(); mockFetch(good);
+  await seedDay(env, '2026-10-10', [{ t: 100 }]);
+  const call = (path, init = {}, hdr = auth.headers) => worker.fetch(new Request('https://x.test' + path, { ...init, headers: hdr }), env);
+  const c = await (await call('/api/share', { method: 'POST', body: JSON.stringify({ days: 365 }) })).json();
+  const url = (r) => `/api/export.csv?share=${c.id}&report=${r}&from=2026-10-10&to=2026-10-10`;
+  const d = await call(url('daily'), {}, {});
+  assert.equal(d.status, 200); assert.match(d.headers.get('content-type'), /text\/csv/);
+  const buf = new Uint8Array(await d.arrayBuffer()), t = new TextDecoder().decode(buf);
+  assert.ok(t.includes('2026-10-10,1,100')); assert.deepEqual([...buf.slice(0, 3)], [0xef, 0xbb, 0xbf]);   // BOM لعرض العربية صحيحاً
+  for (const r of ['summary', 'products', 'categories', 'cancelled']) assert.equal((await call(url(r), {}, {})).status, 200);
+  assert.equal((await call('/api/export.csv?report=daily', {}, {})).status, 401);
+  assert.equal((await call(`/api/export.csv?share=${'0'.repeat(32)}&report=daily`, {}, {})).status, 401);
+  assert.equal((await call(url('nope'), {}, {})).status, 400);
+});
