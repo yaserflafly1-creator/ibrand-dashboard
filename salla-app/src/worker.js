@@ -211,8 +211,7 @@ async function handleExport(req, env) {
       if (!tokens) throw new Error('salla 403 app not installed');
       const get = makeClient(env, rec.merchant, tokens);
       const rows = [];
-      for (let page = 1; page <= 100; page++) {
-        const j = await get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page });
+      const take = (j) => {
         for (const o of j.data || []) {
           const day = String(o.date?.date || '').slice(0, 10);
           if (o.draft || day < from || day > to) continue;
@@ -220,7 +219,14 @@ async function handleExport(req, env) {
           if (want === 'valid' ? ['canceled', 'refunded', 'unpaid'].includes(st) : want === 'canceled' ? st !== 'canceled' : false) continue;
           rows.push([String(o.date.date).slice(0, 16), Math.round((Number(o.total?.amount) || 0) * 100) / 100]);
         }
-        if (page >= (j.pagination?.totalPages || 1) || !(j.data || []).length) break;
+      };
+      const fetchPage = (page) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page });
+      const first = await fetchPage(1);   // الصفحة الأولى وحدها (تجدّد التوكن إن لزم)، ثم الباقي دفعات متوازية لتفادي مهلة جوجل شيت
+      take(first);
+      const pages = Math.min(100, first.pagination?.totalPages || 1);
+      for (let p = 2; p <= pages; p += 6) {
+        const batch = await Promise.all(Array.from({ length: Math.min(6, pages - p + 1) }, (_, k) => fetchPage(p + k)));
+        batch.forEach(take);
       }
       rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
       return '\uFEFF' + toCsv([['التاريخ', 'قيمة الطلب'], ...rows]);
