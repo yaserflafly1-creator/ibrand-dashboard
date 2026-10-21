@@ -170,3 +170,16 @@ test('export.csv: share-gated aggregate CSV reports for Google Sheets', async ()
   assert.equal((await call(`/api/export.csv?share=${'0'.repeat(32)}&report=daily`, {}, {})).status, 401);
   assert.equal((await call(url('nope'), {}, {})).status, 400);
 });
+
+test('export.csv orders: per-order date + total only, valid orders by default', async () => {
+  const env = mkEnv();
+  const ord = (id, d, total, slug) => ({ id, reference_id: id, total: { amount: total }, date: { date: d + ':00.000000' }, status: { slug }, draft: false, customer: { id: 1, full_name: 'سري' }, items: [] });
+  mockFetch(good, { '/orders': () => ok([ord(1, '2026-10-10 09:05', 100.5, 'completed'), ord(2, '2026-10-10 08:00', 40, 'canceled'), ord(3, '2026-10-09 23:59', 7, 'completed')], { totalPages: 1 }) });
+  const call = (path, init = {}, hdr = auth.headers) => worker.fetch(new Request('https://x.test' + path, { ...init, headers: hdr }), env);
+  const c = await (await call('/api/share', { method: 'POST', body: '{}' })).json();
+  const r = await call(`/api/export.csv?share=${c.id}&report=orders&from=2026-10-10&to=2026-10-10`, {}, {});
+  assert.equal(r.status, 200);
+  const t = await r.text();
+  assert.ok(t.includes('2026-10-10 09:05,100.5')); assert.ok(!t.includes('40')); assert.ok(!t.includes('سري')); assert.ok(!t.includes('2026-10-09'));
+  assert.equal((await call(`/api/export.csv?share=${c.id}&report=orders&period=year`, {}, {})).status, 400);
+});

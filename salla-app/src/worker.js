@@ -1,4 +1,4 @@
-import { normalizeOrder, normalizeCoupon, normalizeShipment } from './salla.js';
+import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows } from './db.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
@@ -193,15 +193,41 @@ const catInfo = (env, merchant) => memo(`catmap:${merchant}`, 600e3, async () =>
 });
 
 /* ---------- /api/export.csv: تقارير إجمالية لجوجل شيت (IMPORTDATA لا يرسل ترويسات، فالرابط يحمل share في الاستعلام) ---------- */
+const ORDERS_EXPORT_MAX_DAYS = 31;
 async function handleExport(req, env) {
   const q = new URL(req.url).searchParams;
   const rec = await shareById(env, q.get('share'));
   const text = (s, status = 200) => new Response(s, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
   if (!rec) return text('unauthorized', 401);
   const report = q.get('report') || 'summary';
-  if (!REPORTS.includes(report)) return text('unknown report: ' + REPORTS.join(', '), 400);
+  if (!REPORTS.includes(report) && report !== 'orders') return text('unknown report: ' + REPORTS.join(', '), 400);
   const { from, to } = periodRange(q.get('period') || 'month', riyadhDay(Date.now()), q.get('from'), q.get('to'));
-  if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) > 800) return text('range too long', 400);
+  const span = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
+  if (report === 'orders') {   // قيمة كل طلب وتاريخه فقط (بلا اسم عميل): تُجلب من سلة عند الطلب فنحدّ الفترة
+    if (span > ORDERS_EXPORT_MAX_DAYS) return text(`orders report allows up to ${ORDERS_EXPORT_MAX_DAYS} days`, 400);
+    const want = ['all', 'canceled'].includes(q.get('status')) ? q.get('status') : 'valid';
+    const body = await memo(`csvo:${rec.merchant}:${from}:${to}:${want}`, 300e3, async () => {
+      const tokens = await loadTokens(env, rec.merchant);
+      if (!tokens) throw new Error('salla 403 app not installed');
+      const get = makeClient(env, rec.merchant, tokens);
+      const rows = [];
+      for (let page = 1; page <= 100; page++) {
+        const j = await get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page });
+        for (const o of j.data || []) {
+          const day = String(o.date?.date || '').slice(0, 10);
+          if (o.draft || day < from || day > to) continue;
+          const st = mapStatus(o.status?.slug);
+          if (want === 'valid' ? ['canceled', 'refunded', 'unpaid'].includes(st) : want === 'canceled' ? st !== 'canceled' : false) continue;
+          rows.push([String(o.date.date).slice(0, 16), Math.round((Number(o.total?.amount) || 0) * 100) / 100]);
+        }
+        if (page >= (j.pagination?.totalPages || 1) || !(j.data || []).length) break;
+      }
+      rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+      return '\uFEFF' + toCsv([['التاريخ', 'قيمة الطلب'], ...rows]);
+    });
+    return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
+  }
+  if (span > 800) return text('range too long', 400);
   const body = await memo(`csv:${rec.merchant}:${report}:${from}:${to}`, to < riyadhDay(Date.now()) ? 600e3 : 120e3, async () => {
     await ensureSchema(env.DB);
     const rows = await rangeRows(env.DB, rec.merchant, from, to);
