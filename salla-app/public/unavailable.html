@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>أصناف ملغاة لعدم التوفر</title>
+<style>
+:root{--pink:#db2777;--bg:#fdf2f8;--ink:#2b1020;--muted:#7c5a6b}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink);padding:16px}
+.card{max-width:520px;margin:24px auto;background:#fff;border:1px solid #f0cfe0;border-radius:16px;padding:20px}
+h1{font-size:1.15rem;margin:0 0 6px}
+p{color:var(--muted);font-size:.88rem;line-height:1.7;margin:0 0 14px}
+label{display:block;font-size:.85rem;margin:10px 0 4px}
+input{width:100%;padding:9px;border:1px solid #f0cfe0;border-radius:10px;font-size:1rem}
+button{margin-top:16px;width:100%;padding:12px;border:0;border-radius:12px;background:var(--pink);color:#fff;font-size:1rem;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.bar{height:10px;background:#f6dce9;border-radius:99px;margin-top:16px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--pink);transition:width .3s}
+#log{font-size:.85rem;color:var(--muted);margin-top:10px;min-height:1.4em}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>الأصناف الملغاة بسبب «عدم توفر المنتج»</h1>
+  <p>تُجلب الفترة على أجزاء صغيرة ثم تُجمع في ملف واحد. اترك الصفحة مفتوحة حتى ينتهي الجلب.</p>
+  <label for="from">من تاريخ</label><input id="from" type="date">
+  <label for="to">إلى تاريخ</label><input id="to" type="date">
+  <label for="limit">أقصى عدد أصناف</label><input id="limit" type="number" min="1" max="5000" value="1000">
+  <button id="go" type="button">بدء الجلب</button>
+  <div class="bar"><i id="bar"></i></div>
+  <div id="log"></div>
+  <button id="dl" type="button" hidden>تنزيل الملف (CSV)</button>
+</div>
+<script>
+const SHARE = new URLSearchParams(location.search).get('share') || '';
+const $ = (s) => document.querySelector(s);
+const pad = (n) => String(n).padStart(2, '0');
+const iso = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+const addDays = (s, n) => iso(new Date(Date.parse(s + 'T00:00:00Z') + n * 864e5));
+const today = iso(new Date(Date.now() + 3 * 36e5));   // توقيت الرياض
+$('#to').value = today; $('#from').value = addDays(today, -90);
+
+function parseCsv(t) {
+  const rows = []; let row = [], cell = '', q = false;
+  t = t.replace(/^﻿/, '');
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+const csvCell = (v) => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+
+// جزء واحد؛ إن رفضه الخادم لكثرة الطلبات نقسمه نصفين (حتى يوم واحد)
+async function chunk(from, to) {
+  const r = await fetch(`/api/export.csv?share=${SHARE}&report=unavailable&limit=5000&from=${from}&to=${to}`);
+  const t = await r.text();
+  if (r.ok) return parseCsv(t).slice(1);
+  if (r.status === 400 && /too many/.test(t) && from < to) {
+    const mid = addDays(from, Math.floor((Date.parse(to) - Date.parse(from)) / 864e5 / 2));
+    return [...await chunk(mid < to ? addDays(mid, 1) : to, to), ...await chunk(from, mid)];
+  }
+  throw new Error(r.status + ' ' + t.slice(0, 80));
+}
+
+let result = [];
+$('#go').onclick = async () => {
+  if (!/^[0-9a-f]{32}$/.test(SHARE)) { $('#log').textContent = 'الرابط ناقص: افتح الصفحة من الرابط الذي أُرسل لك (فيه share=...)'; return; }
+  const from = $('#from').value, to = $('#to').value, limit = Math.min(5000, Math.max(1, Number($('#limit').value) || 1000));
+  if (!from || !to || from > to) { $('#log').textContent = 'التاريخ غير صحيح'; return; }
+  $('#go').disabled = true; $('#dl').hidden = true; result = [];
+  const STEP = 4, spans = [];                       // نبدأ من الأحدث
+  for (let e = to; e >= from; e = addDays(e, -STEP)) { const s = addDays(e, -(STEP - 1)); spans.push([s < from ? from : s, e]); }
+  try {
+    for (let i = 0; i < spans.length && result.length < limit; i++) {
+      $('#log').textContent = `جاري الجلب… ${spans[i][0]} إلى ${spans[i][1]} (وُجد ${result.length} صنف)`;
+      result.push(...await chunk(spans[i][0], spans[i][1]));
+      $('#bar').style.width = Math.round(((i + 1) / spans.length) * 100) + '%';
+    }
+    result = result.slice(0, limit).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    $('#bar').style.width = '100%';
+    $('#log').textContent = `انتهى: ${result.length} صنف. اضغط تنزيل.`;
+    $('#dl').hidden = result.length === 0;
+    if (!result.length) $('#log').textContent = 'لا توجد أصناف ملغاة بسبب عدم التوفر في هذه الفترة.';
+  } catch (e) { $('#log').textContent = 'تعذّر الجلب: ' + e.message; }
+  $('#go').disabled = false;
+};
+$('#dl').onclick = () => {
+  const head = ['التاريخ', 'رقم الطلب', 'الصنف', 'الكمية', 'قيمة الطلب'];
+  const body = '﻿' + [head, ...result].map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }));
+  a.download = `unavailable-${$('#from').value}_${$('#to').value}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+</script>
+</body>
+</html>
