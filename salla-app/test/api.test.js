@@ -200,3 +200,23 @@ test('export.csv orders: refuses (400) instead of silently truncating huge range
   const r = await call(`/api/export.csv?share=${c.id}&report=orders&from=2026-10-01&to=2026-10-20`, {});
   assert.equal(r.status, 400); assert.match(await r.text(), /too many orders/);
 });
+
+test('export.csv unavailable: items of orders canceled with an "out of stock" history note', async () => {
+  const env = mkEnv();
+  const ord = (id, d, status, items) => ({ id, reference_id: 900 + id, total: { amount: 50 }, date: { date: d + ':00.000000' }, status: { slug: status }, draft: false, items });
+  const hist = { 1: 'عدم توفر المنتج', 2: 'من قبل العميل', 3: '' };
+  mockFetch(good, {
+    '/orders/': (u) => { const id = Number(/orders\/(\d+)\/histories/.exec(u)[1]); return ok([{ status: 'ملغي', customized: { slug: 'canceled' }, note: hist[id] }, { status: 'ملغي', customized: { slug: 'canceled' }, note: 'تم إرجاع المنتجات إلى المخزون' }], { totalPages: 1 }); },
+    '/orders': () => ok([ord(1, '2026-10-10 09:05', 'canceled', [{ name: 'حليب', quantity: 2 }, { name: 'حفاض', quantity: 1 }]), ord(2, '2026-10-10 10:00', 'canceled', [{ name: 'X', quantity: 1 }]), ord(3, '2026-10-11 10:00', 'completed', [{ name: 'Y', quantity: 1 }])], { totalPages: 1 })
+  });
+  const call = (path, init = {}, hdr = auth.headers) => worker.fetch(new Request('https://x.test' + path, { ...init, headers: hdr }), env);
+  const c = await (await call('/api/share', { method: 'POST', body: '{}' })).json();
+  const r = await call(`/api/export.csv?share=${c.id}&report=unavailable&from=2026-10-10&to=2026-10-11`, {}, {});
+  assert.equal(r.status, 200);
+  const t = await r.text();
+  assert.ok(t.includes('2026-10-10,901,حليب,2,50')); assert.ok(t.includes('حفاض'));
+  assert.ok(!t.includes('X') && !t.includes('Y'));
+  const lim = await (await call(`/api/export.csv?share=${c.id}&report=unavailable&from=2026-10-10&to=2026-10-11&limit=1`, {}, {})).text();
+  assert.equal(lim.trim().split('\n').length, 2);
+  assert.equal((await call(`/api/export.csv?share=${c.id}&report=unavailable&period=year`, {}, {})).status, 400);
+});

@@ -194,13 +194,16 @@ const catInfo = (env, merchant) => memo(`catmap:${merchant}`, 600e3, async () =>
 
 /* ---------- /api/export.csv: تقارير إجمالية لجوجل شيت (IMPORTDATA لا يرسل ترويسات، فالرابط يحمل share في الاستعلام) ---------- */
 const ORDERS_EXPORT_MAX_DAYS = 31, ORDERS_EXPORT_MAX_PAGES = 300;
+const UNAVAILABLE_RE = /عدم\s*توفر|غير\s*متوفر|نفد|نفاد/;   // سبب الإلغاء تكتبه الفروع كملاحظة في سجل الطلب (مثل «عدم توفر المنتج»)
+const UNAVAIL_MAX_PAGES = 150, UNAVAIL_MAX_ORDERS = 700;      // سقف نداءات سلة في الطلب الواحد (حد النداءات الفرعية 1000)
+const pool = async (items, n, fn) => { const out = []; for (let i = 0; i < items.length; i += n) out.push(...await Promise.all(items.slice(i, i + n).map(fn))); return out; };
 async function handleExport(req, env) {
   const q = new URL(req.url).searchParams;
   const rec = await shareById(env, q.get('share'));
   const text = (s, status = 200) => new Response(s, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
   if (!rec) return text('unauthorized', 401);
   const report = q.get('report') || 'summary';
-  if (!REPORTS.includes(report) && report !== 'orders') return text('unknown report: ' + REPORTS.join(', '), 400);
+  if (!REPORTS.includes(report) && !['orders', 'unavailable'].includes(report)) return text('unknown report: ' + REPORTS.join(', '), 400);
   const { from, to } = periodRange(q.get('period') || 'month', riyadhDay(Date.now()), q.get('from'), q.get('to'));
   const span = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
   if (report === 'orders') {   // قيمة كل طلب وتاريخه فقط (بلا اسم عميل): تُجلب من سلة عند الطلب فنحدّ الفترة
@@ -231,6 +234,36 @@ async function handleExport(req, env) {
       }
       rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
       return '\uFEFF' + toCsv([['التاريخ', 'قيمة الطلب'], ...rows]);
+    }).catch((e) => (e.tooMany ? e : Promise.reject(e)));
+    if (body instanceof Error) return text(body.message, 400);
+    return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
+  }
+  if (report === 'unavailable') {   // أصناف الطلبات الملغية بسبب «عدم توفر المنتج» (من ملاحظة سجل الطلب): صنف في كل سطر
+    if (span > ORDERS_EXPORT_MAX_DAYS) return text(`unavailable report allows up to ${ORDERS_EXPORT_MAX_DAYS} days`, 400);
+    const limit = Math.min(3000, Math.max(1, Math.floor(Number(q.get('limit'))) || 1000));
+    const body = await memo(`csvu:${rec.merchant}:${from}:${to}:${limit}`, 600e3, async () => {
+      const tokens = await loadTokens(env, rec.merchant);
+      if (!tokens) throw new Error('salla 403 app not installed');
+      const get = makeClient(env, rec.merchant, tokens);
+      const fetchPage = (page) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page });
+      const first = await fetchPage(1), pages = first.pagination?.totalPages || 1;
+      if (pages > UNAVAIL_MAX_PAGES) throw Object.assign(new Error('too many orders: use a shorter range'), { tooMany: true });
+      const batches = [first, ...(pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, fetchPage) : [])];
+      const canceled = batches.flatMap((j) => j.data || []).filter((o) => !o.draft && mapStatus(o.status?.slug) === 'canceled' && String(o.date?.date || '').slice(0, 10) >= from && String(o.date?.date || '').slice(0, 10) <= to);
+      if (canceled.length > UNAVAIL_MAX_ORDERS) throw Object.assign(new Error('too many canceled orders: use a shorter range'), { tooMany: true });
+      const hits = await pool(canceled, 8, async (o) => {
+        const h = await get(`/orders/${o.id}/histories`, {});
+        return (h.data || []).some((e) => (e.customized?.slug === 'canceled' || e.status === 'ملغي') && UNAVAILABLE_RE.test(String(e.note || ''))) ? o : null;
+      });
+      const rows = [];
+      for (const o of hits.filter(Boolean)) {   // الأحدث أولاً: عند بلوغ الحد نقصّ الأقدم
+        for (const it of o.items || []) {
+          if (rows.length >= limit) break;
+          rows.push([String(o.date.date).slice(0, 10), o.reference_id ?? o.id, it.name || '', Number(it.quantity) || 1, Math.round((Number(o.total?.amount) || 0) * 100) / 100]);
+        }
+      }
+      rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      return '\uFEFF' + toCsv([['التاريخ', 'رقم الطلب', 'الصنف', 'الكمية', 'قيمة الطلب'], ...rows]);
     }).catch((e) => (e.tooMany ? e : Promise.reject(e)));
     if (body instanceof Error) return text(body.message, 400);
     return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
