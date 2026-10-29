@@ -220,7 +220,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 .dlg .close{margin-top:16px;width:100%;justify-content:center;background:var(--pink-50);color:var(--pink-700)}
 @media (max-width:960px){.grid-3{grid-template-columns:1fr}}
 
-@media (max-width:640px){.mini-kpis{grid-template-columns:1fr 1fr!important}}
+@media (max-width:640px){#mthPanel .mh{display:none}#mthPanel table{min-width:0!important;width:100%}#mthPanel th,#mthPanel td{padding:10px 6px;font-size:.8rem}.mini-kpis{grid-template-columns:1fr 1fr!important}}
 
 /* Responsive */
 @media (max-width:1380px){.grid-kpi{grid-template-columns:repeat(3,1fr)}}
@@ -349,6 +349,14 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
       <div class="panel-h"><div><h2>الأكثر مبيعاً</h2><p>أسرع 20 منتجاً حركة · بالكمية المباعة</p></div></div>
       <ul class="top-list" id="top"></ul>
     </div>
+  </section>
+
+  <section class="card panel sec" id="mthPanel">
+    <div class="panel-h"><div><h2>متوسط الشهور</h2><p id="mthSub">آخر 12 شهراً · المتوسط من الأشهر الكاملة فقط (لا يتأثر بفلتر التاريخ)</p></div></div>
+    <div class="mini-kpis" id="mthKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="chart-box" style="height:260px"><canvas id="mthChart" dir="ltr"></canvas></div>
+    <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>الشهر</th><th>المبيعات</th><th>الطلبات</th><th class="mh">متوسط الطلب</th><th class="mh">الملغية</th><th>عن المتوسط</th></tr></thead><tbody id="mthRows"></tbody></table></div>
+    <p class="period-note" id="mthNote" style="margin:10px 0 0"></p>
   </section>
 
   <section class="card panel sec" id="bskPanel">
@@ -871,6 +879,60 @@ $('#prodSearch').addEventListener('input', renderProducts);
 $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProducts(); });
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
+/* ============ متوسط الشهور ============ */
+let mthData = null, mthChart = null, mthSeq = 0, mthAt = 0;
+function demoMonths(){
+  const by = {}, cur = ymd(new Date()).slice(0,7);
+  ORDERS.forEach(o => { const d = new Date(o.ts), m = ymd(d).slice(0,7), e = by[m] || (by[m] = {m, days:new Set(), revenue:0, orders:0, units:0, canceled:0, canceledValue:0});
+    e.days.add(d.getDate());
+    if(VALID(o)){ e.revenue += o.total; e.orders++; e.units += o.lines.reduce((x,[,q]) => x+q, 0); } else if(o.status==='canceled'){ e.canceled++; e.canceledValue += o.total; } });
+  const keys = Object.keys(by).sort().slice(-12);   // كما في الخادم: آخر 12 شهراً
+  const rows = keys.map((m,i) => { const e = by[m], dim = new Date(+m.slice(0,4), +m.slice(5,7), 0).getDate();
+    return {m, days:e.days.size, daysInMonth:dim, revenue:e.revenue, orders:e.orders, units:e.units, canceled:e.canceled, canceledValue:e.canceledValue, aov:e.orders ? e.revenue/e.orders : 0, complete:m<cur && i>0}; });
+  const full = rows.filter(x => x.complete), n = full.length, sum = k => full.reduce((a,x) => a+x[k], 0);
+  const best = full.slice().sort((a,b) => b.revenue-a.revenue)[0] || null;
+  return {months:rows, current:cur, avg:{months:n, revenue:n ? sum('revenue')/n : 0, orders:n ? Math.round(sum('orders')/n) : 0, units:n ? Math.round(sum('units')/n) : 0, canceled:n ? Math.round(sum('canceled')/n) : 0,
+    aov:sum('orders') ? sum('revenue')/sum('orders') : 0, perDay:sum('days') ? sum('revenue')/sum('days') : 0, best:best && {m:best.m, revenue:best.revenue}}};
+}
+async function loadMonths(force){
+  if(!force && mthData && Date.now()-mthAt < 300e3) return;
+  const seq = ++mthSeq;
+  try{ mthData = LIVE ? await api('/api/months?n=12') : demoMonths(); mthAt = Date.now(); }
+  catch(e){ if(e.status===401 && !SHARE) return; mthData = null; }
+  if(seq !== mthSeq) return;
+  renderMonths();
+}
+const mthLabel = m => `${MONTHS[+m.slice(5,7)-1]} ${m.slice(0,4)}`;
+function renderMonths(){
+  const D = mthData, panel = $('#mthPanel'); if(!panel) return;
+  if(!D || !D.months.length){ $('#mthKpis').innerHTML = ''; $('#mthRows').innerHTML = '<tr><td colspan="6" class="empty">'+(D ? 'لا توجد بيانات شهرية بعد' : 'تعذّر تحميل المتوسطات')+'</td></tr>'; $('#mthNote').textContent = ''; if(mthChart){ mthChart.destroy(); mthChart = null; } return; }
+  const A = D.avg, ms = D.months;
+  $('#mthKpis').innerHTML = [
+    [money(A.revenue)+' '+CURRENCY, 'متوسط المبيعات الشهرية'],
+    [fmt(A.orders), 'متوسط الطلبات الشهرية'],
+    [money(A.perDay)+' '+CURRENCY, 'متوسط المبيعات اليومية'],
+    [A.best ? mthLabel(A.best.m) : '—', A.best ? 'أفضل شهر · '+money(A.best.revenue)+' '+CURRENCY : 'أفضل شهر']
+  ].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
+  const rows = ms.slice().reverse();
+  $('#mthRows').innerHTML = rows.map(x => {
+    const diff = A.revenue && x.complete ? (x.revenue/A.revenue-1)*100 : null;
+    const cmp = x.complete ? (diff===null ? '—' : `<span style="color:${diff>=0?'#16a34a':'#dc2626'};font-weight:700">${diff>=0?'▲':'▼'} ${Math.abs(diff).toFixed(1)}%</span>`) : '<span style="color:var(--muted)">غير مكتمل</span>';
+    return `<tr><td>${mthLabel(x.m)}</td><td>${money(x.revenue)} ${CURRENCY}</td><td>${fmt(x.orders)}</td><td class="mh">${money(x.aov)}</td><td class="mh">${fmt(x.canceled)}</td><td>${cmp}</td></tr>`; }).join('');
+  $('#mthNote').textContent = A.months ? `المتوسط محسوب من ${A.months} ${A.months<11?'أشهر':'شهراً'} كاملة. الشهر الحالي والأشهر الناقصة تظهر باللون الفاتح ولا تدخل المتوسط.` : 'لا توجد أشهر كاملة بعد لحساب المتوسط.';
+  const data = {labels:ms.map(x => mthLabel(x.m)), datasets:[
+    {type:'bar', label:'المبيعات', data:ms.map(x => x.revenue), backgroundColor:ms.map(x => x.complete ? '#ec4899' : '#f9a8d4'), borderRadius:8, maxBarThickness:46, order:2},
+    {type:'line', label:'المتوسط', data:ms.map(() => A.revenue), borderColor:'#7c3aed', borderDash:[6,4], borderWidth:2, pointRadius:0, fill:false, order:1}
+  ]};
+  const opts = {responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:false}, tooltip:{rtl:true, textDirection:'rtl', backgroundColor:'#2a1a24', padding:12, cornerRadius:12,
+      titleFont:{family:'IBM Plex Sans Arabic'}, bodyFont:{family:'IBM Plex Sans Arabic'},
+      callbacks:{label:c => `${c.dataset.label}: ${money(c.parsed.y)} ${CURRENCY}`, afterBody:i => { const x = ms[i[0].dataIndex]; return [`الطلبات: ${fmt(x.orders)}`, x.complete ? '' : 'شهر غير مكتمل'].filter(Boolean); }}}},
+    scales:{x:{grid:{display:false}, border:{display:false}, ticks:{color:'#8b7480', maxRotation:0, autoSkip:true, font:{family:'IBM Plex Sans Arabic', size:11}}},
+      y:{beginAtZero:true, border:{display:false}, grid:{color:'#f6e9ef'}, ticks:{maxTicksLimit:5, color:'#8b7480', font:{family:'IBM Plex Sans Arabic', size:11}, callback:v => v>=1000 ? (v/1000)+'K' : v}}}};
+  if(mthChart){ mthChart.data = data; mthChart.options = opts; mthChart.update(); }
+  else mthChart = new Chart($('#mthChart'), {data, options:opts});
+}
+
 /* ============ تحليل سلة المشتريات ============ */
 let bskMode = 'units', bskPairMode = 'cats', bskSeq = 0, bskData = null;
 function demoBasket(from, to){
@@ -1110,6 +1172,7 @@ async function update(){
   renderTop(cur);
   renderCategories(cur);
   loadBasket(from, to);
+  loadMonths();
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur, prev};

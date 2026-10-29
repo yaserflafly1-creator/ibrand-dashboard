@@ -1,6 +1,6 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows } from './db.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats } from './db.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
@@ -337,6 +337,32 @@ async function handleBasket(req, env) {
   return new Response(text, { headers: { 'content-type': 'application/json' } });
 }
 
+/* ---------- /api/months: آخر N شهراً + المتوسط الشهري (الأشهر الكاملة فقط) ---------- */
+const r2n = (n) => Math.round((Number(n) || 0) * 100) / 100;
+export function monthsReport(rows, today) {
+  const cur = today.slice(0, 7), dim = (m) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate();
+  const months = rows.map((x) => ({ ...x, revenue: r2n(x.revenue), canceledValue: r2n(x.canceledValue), aov: x.orders ? r2n(x.revenue / x.orders) : 0, daysInMonth: dim(x.m), complete: x.m < cur && x.days >= dim(x.m) }));
+  const full = months.filter((x) => x.complete), n = full.length;
+  const sum = (k) => full.reduce((a, x) => a + x[k], 0);
+  const best = full.slice().sort((a, b) => b.revenue - a.revenue)[0] || null, worst = full.slice().sort((a, b) => a.revenue - b.revenue)[0] || null;
+  const avg = { months: n, revenue: n ? r2n(sum('revenue') / n) : 0, orders: n ? Math.round(sum('orders') / n) : 0, units: n ? Math.round(sum('units') / n) : 0,
+    canceled: n ? Math.round(sum('canceled') / n) : 0, aov: sum('orders') ? r2n(sum('revenue') / sum('orders')) : 0, perDay: sum('days') ? r2n(sum('revenue') / sum('days')) : 0,
+    best: best && { m: best.m, revenue: best.revenue }, worst: worst && { m: worst.m, revenue: worst.revenue } };
+  return { months, avg, current: cur };
+}
+async function handleMonths(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  const n = Math.min(13, Math.max(2, Math.floor(Number(new URL(req.url).searchParams.get('n'))) || 12));
+  const today = riyadhDay(Date.now());
+  const first = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 - (n - 1), 1)).toISOString().slice(0, 10);
+  const text = await memo(`months:${ctx.merchant}:${n}`, 120e3, async () => {
+    await ensureSchema(env.DB);
+    return JSON.stringify(monthsReport(await monthlyStats(env.DB, ctx.merchant, first, today), today));
+  });
+  return new Response(text, { headers: { 'content-type': 'application/json' } });
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -438,6 +464,7 @@ export default {
       if (pathname === '/api/summary' && req.method === 'GET') return await handleSummary(req, env);
       if (pathname === '/api/share' && ['GET', 'POST', 'DELETE'].includes(req.method)) return await handleShare(req, env);
       if (pathname === '/api/export.csv' && req.method === 'GET') return await handleExport(req, env);
+      if (pathname === '/api/months' && req.method === 'GET') return await handleMonths(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);

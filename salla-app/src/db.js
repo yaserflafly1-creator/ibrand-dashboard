@@ -56,6 +56,14 @@ export async function rangeRows(db, m, from, to) {
   return results.map((r) => JSON.parse(r.data));
 }
 
+// إجماليات شهرية من الملخصات اليومية (SQL فقط: بلا تحليل JSON لكل يوم في الـWorker)
+export async function monthlyStats(db, m, from, to) {
+  const { results } = await db.prepare(`SELECT substr(day, 1, 7) AS m, COUNT(*) AS days, SUM(json_extract(data, '$.revenue')) AS revenue, SUM(json_extract(data, '$.valid')) AS orders,
+      SUM(json_extract(data, '$.units')) AS units, SUM(json_extract(data, '$.canceled')) AS canceled, SUM(json_extract(data, '$.lost.canceled.v')) AS canceledValue
+    FROM day_agg WHERE merchant = ? AND day BETWEEN ? AND ? GROUP BY m ORDER BY m`).bind(m, from, to).all();
+  return results.map((r) => ({ m: r.m, days: r.days, revenue: r.revenue || 0, orders: r.orders || 0, units: r.units || 0, canceled: r.canceled || 0, canceledValue: r.canceledValue || 0 }));
+}
+
 // الأيام المخزّنة فعلاً (حتى الأيام بلا طلبات تُكتب صفاً فارغاً) لاكتشاف الفجوات
 export async function loadedDays(db, m, from, to) {
   // اليوم «محمَّل» إن وُجد ملخصه وتحليل سلته معاً (فيُعاد جلب أيام سابقة لإضافة ميزة جديدة تلقائياً)

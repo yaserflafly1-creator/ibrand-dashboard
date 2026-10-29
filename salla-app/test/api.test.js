@@ -220,3 +220,18 @@ test('export.csv unavailable: items of orders canceled with an "out of stock" hi
   assert.equal(lim.trim().split('\n').length, 2);
   assert.equal((await call(`/api/export.csv?share=${c.id}&report=unavailable&period=year`, {}, {})).status, 400);
 });
+
+test('months: average over complete months only; endpoint requires auth and returns months', async () => {
+  const { monthsReport } = await import('../src/worker.js');
+  const row = (m, days, revenue, orders) => ({ m, days, revenue, orders, units: orders * 2, canceled: 5, canceledValue: 50 });
+  const j = monthsReport([row('2026-07', 1, 999, 1), row('2026-08', 31, 3100, 31), row('2026-09', 30, 6000, 30), row('2026-10', 2, 50, 1)], '2026-10-02');
+  const by = Object.fromEntries(j.months.map((x) => [x.m, x]));
+  assert.equal(by['2026-07'].complete, false); assert.equal(by['2026-10'].complete, false); assert.equal(by['2026-09'].complete, true);
+  assert.equal(j.avg.months, 2); assert.equal(j.avg.revenue, 4550); assert.equal(j.avg.orders, 31); assert.equal(j.avg.best.m, '2026-09');
+  assert.equal(j.avg.perDay, Math.round(9100 / 61 * 100) / 100); assert.equal(by['2026-08'].aov, 100);
+  const env = mkEnv(); mockFetch(good);
+  await seedDay(env, riyadhDay(Date.now()), [{ t: 100 }]);
+  const r = await get(env, '/api/months?n=3'); assert.equal(r.status, 200);
+  assert.ok(Array.isArray((await r.json()).months));
+  assert.equal((await worker.fetch(new Request('https://x.test/api/months'), env)).status, 401);
+});
