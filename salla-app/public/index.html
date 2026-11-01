@@ -243,6 +243,17 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (max-width:380px){.grid-kpi{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
+/* تبويبات اللوحة: كل قسم يحمل data-tab؛ الأقسام الجديدة تُضاف بإعطائها data-tab فقط */
+.tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 12px;position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg,#fdf2f8) 78%,transparent);scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:none;border:1px solid var(--border,#f0cfe0);background:#fff;color:var(--ink,#2b1020);border-radius:999px;padding:9px 16px;font:inherit;font-size:.9rem;cursor:pointer;white-space:nowrap}
+.tabs button.on{background:var(--pink-600,#db2777);border-color:var(--pink-600,#db2777);color:#fff;font-weight:700}
+body[data-tab="overview"] [data-tab]:not([data-tab="overview"]){display:none!important}
+body[data-tab="products"] [data-tab]:not([data-tab="products"]){display:none!important}
+body[data-tab="sales"] [data-tab]:not([data-tab="sales"]){display:none!important}
+body[data-tab="cancel"] [data-tab]:not([data-tab="cancel"]){display:none!important}
+body[data-tab="ops"] [data-tab]:not([data-tab="ops"]){display:none!important}
+body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
 /* كمل احتياجك */
 .cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
@@ -316,11 +327,20 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <button class="linkbtn" id="refreshNow" type="button">تحديث الآن</button>
   </div>
 
+  <nav class="tabs" id="tabs" role="tablist" aria-label="أقسام اللوحة">
+    <button type="button" role="tab" data-t="overview" class="on">نظرة عامة</button>
+    <button type="button" role="tab" data-t="products">المنتجات والتصنيفات</button>
+    <button type="button" role="tab" data-t="sales">العملاء والمبيعات</button>
+    <button type="button" role="tab" data-t="cancel">الملغي</button>
+    <button type="button" role="tab" data-t="ops">المخزون والشحن</button>
+    <button type="button" role="tab" data-t="cx">كمل احتياجك</button>
+  </nav>
+
   <!-- KPIs -->
-  <section class="grid-kpi" id="kpis" aria-label="المؤشرات الرئيسية"></section>
+  <section data-tab="overview" class="grid-kpi" id="kpis" aria-label="المؤشرات الرئيسية"></section>
 
   <!-- Charts -->
-  <section class="grid-charts">
+  <section data-tab="overview" class="grid-charts">
     <div class="card panel">
       <div class="panel-h">
         <div><h2>اتجاه المبيعات</h2><p>تذبذب الإيرادات عبر الزمن</p></div>
@@ -343,7 +363,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
   </section>
 
   <!-- Tables -->
-  <section class="grid-bottom">
+  <section data-tab="overview" class="grid-bottom">
     <div class="card panel">
       <div class="panel-h">
         <div><h2>أحدث الطلبات</h2><p id="ordersCount"></p></div>
@@ -365,7 +385,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
   </section>
 
-  <section class="card panel sec" id="mthPanel">
+  <section data-tab="overview" class="card panel sec" id="mthPanel">
     <div class="panel-h"><div><h2>متوسط الشهور</h2><p id="mthSub">آخر 12 شهراً · المتوسط من الأشهر الكاملة فقط (لا يتأثر بفلتر التاريخ)</p></div></div>
     <div class="mini-kpis" id="mthKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div class="chart-box" style="height:260px"><canvas id="mthChart" dir="ltr"></canvas></div>
@@ -373,29 +393,14 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <p class="period-note" id="mthNote" style="margin:10px 0 0"></p>
   </section>
 
-  <section class="card panel sec" id="bskPanel">
-    <div class="panel-h"><div><h2>تحليل سلة المشتريات</h2><p id="bskSub">سلوك العملاء في الشراء خلال الفترة المحددة</p></div></div>
-    <div class="mini-kpis" id="bskKpis" style="grid-template-columns:repeat(4,1fr)"></div>
-    <div class="grid-charts bsk-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-      <div>
-        <div class="seg" id="bskMode" role="group" aria-label="نوع التوزيع" style="margin-bottom:10px"><button data-m="units" class="on">حسب عدد القطع</button><button data-m="lines">حسب عدد المنتجات</button></div>
-        <div class="tbl-wrap"><table><thead><tr><th>حجم السلة</th><th>الطلبات</th><th>النسبة</th><th>متوسط قيمة الطلب</th></tr></thead><tbody id="bskRows"></tbody></table></div>
-      </div>
-      <div>
-        <div class="seg" id="bskPairMode" role="group" aria-label="نوع الأزواج" style="margin-bottom:10px"><button data-m="cats" class="on">تصنيفات تُشترى معاً</button><button data-m="prods">منتجات تُشترى معاً</button></div>
-        <div class="tbl-wrap"><table><thead><tr><th id="bskPairHead">التصنيفان</th><th>طلبات مشتركة</th><th>% من الطلبات</th></tr></thead><tbody id="bskPairs"></tbody></table></div>
-      </div>
-    </div>
-    <p class="period-note" id="bskInsight" style="margin:12px 0 0"></p>
-  </section>
 
-  <section class="grid-3 sec" aria-label="تحليل المبيعات">
+  <section data-tab="sales" class="grid-3 sec" aria-label="تحليل المبيعات">
     <div class="card panel"><div class="panel-h"><div><h2>طرق الدفع</h2><p>حصة كل وسيلة من المبيعات</p></div></div><ul class="bars" id="payBars"></ul></div>
     <div class="card panel"><div class="panel-h"><div><h2>المدن</h2><p>الأعلى مبيعاً (حسب مدينة العميل)</p></div></div><ul class="bars" id="cityBars"></ul></div>
     <div class="card panel"><div class="panel-h"><div><h2>مصدر الطلبات</h2><p>من أين يطلب عملاؤك</p></div></div><ul class="bars" id="srcBars"></ul></div>
   </section>
 
-  <section class="grid-charts">
+  <section data-tab="sales" class="grid-charts">
     <div class="card panel">
       <div class="panel-h">
         <div><h2>أوقات الطلبات</h2><p>متى يشتري عملاؤك أكثر</p></div>
@@ -416,7 +421,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
   </section>
 
-  <section class="card panel sec">
+  <section data-tab="products" class="card panel sec">
     <div class="panel-h">
       <div><h2>مبيعات المنتجات</h2><p id="prodCount"></p></div>
       <div class="field search">
@@ -433,7 +438,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <button class="linkbtn more" id="prodMore" type="button" hidden>عرض الكل</button>
   </section>
 
-  <section class="card panel sec" id="catPanel">
+  <section data-tab="products" class="card panel sec" id="catPanel">
     <div class="panel-h"><div><h2>المبيعات حسب التصنيف</h2><p id="catSub">نسبة تأثير كل تصنيف على المبيعات</p></div></div>
     <div class="tbl-wrap">
       <table class="cat-tbl" style="min-width:560px">
@@ -446,7 +451,23 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <p class="period-note" id="catNote" style="margin:10px 0 0"></p>
   </section>
 
-  <section class="card panel sec" id="invPanel">
+  <section data-tab="products" class="card panel sec" id="bskPanel">
+    <div class="panel-h"><div><h2>تحليل سلة المشتريات</h2><p id="bskSub">سلوك العملاء في الشراء خلال الفترة المحددة</p></div></div>
+    <div class="mini-kpis" id="bskKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="grid-charts bsk-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div>
+        <div class="seg" id="bskMode" role="group" aria-label="نوع التوزيع" style="margin-bottom:10px"><button data-m="units" class="on">حسب عدد القطع</button><button data-m="lines">حسب عدد المنتجات</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>حجم السلة</th><th>الطلبات</th><th>النسبة</th><th>متوسط قيمة الطلب</th></tr></thead><tbody id="bskRows"></tbody></table></div>
+      </div>
+      <div>
+        <div class="seg" id="bskPairMode" role="group" aria-label="نوع الأزواج" style="margin-bottom:10px"><button data-m="cats" class="on">تصنيفات تُشترى معاً</button><button data-m="prods">منتجات تُشترى معاً</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th id="bskPairHead">التصنيفان</th><th>طلبات مشتركة</th><th>% من الطلبات</th></tr></thead><tbody id="bskPairs"></tbody></table></div>
+      </div>
+    </div>
+    <p class="period-note" id="bskInsight" style="margin:12px 0 0"></p>
+  </section>
+
+  <section data-tab="ops" class="card panel sec" id="invPanel">
     <div class="panel-h">
       <div><h2>المخزون</h2><p id="invCount">جارٍ التحميل…</p></div>
       <div class="seg" id="invFilter" role="group" aria-label="تصفية المخزون">
@@ -474,7 +495,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <button class="linkbtn more" id="invMore" type="button" hidden>عرض الكل</button>
   </section>
 
-  <section class="card panel sec" id="shpPanel">
+  <section data-tab="ops" class="card panel sec" id="shpPanel">
     <div class="panel-h"><div><h2>الشحن</h2><p id="shpCount">جارٍ التحميل…</p></div></div>
     <div class="mini-kpis" style="grid-template-columns:repeat(4,1fr)">
       <div class="mini"><b id="shpDel">0</b><span>تم التسليم</span></div>
@@ -489,7 +510,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <p class="period-note" id="shpNote" style="margin:12px 0 0"></p>
   </section>
 
-  <section class="card panel sec" id="cnlPanel">
+  <section data-tab="cancel" class="card panel sec" id="cnlPanel">
     <div class="panel-h">
       <div><h2>الطلبات الملغية</h2><p id="cnlSub"></p></div>
       <div class="seg" id="cnlKind" role="group" aria-label="النوع">
@@ -510,7 +531,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     </div>
   </section>
 
-  <section class="card panel sec" id="cmpPanel">
+  <section data-tab="sales" class="card panel sec" id="cmpPanel">
     <div class="panel-h"><div><h2>مصادر الطلبات والحملات</h2><p id="cmpSub"></p></div></div>
     <div class="grid-charts" style="grid-template-columns:1fr 1.5fr;margin-bottom:0">
       <div><h2 style="font-size:.95rem;margin-bottom:10px">المصادر</h2><ul class="bars" id="cmpSources"></ul></div>
@@ -520,7 +541,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
     <p class="period-note" id="cmpNote" style="margin:12px 0 0"></p>
   </section>
 
-  <section class="card panel sec" id="cpnPanel">
+  <section data-tab="ops" class="card panel sec" id="cpnPanel">
     <div class="panel-h"><div><h2>الكوبونات</h2><p id="cpnCount">جارٍ التحميل…</p></div></div>
     <div class="mini-kpis" style="grid-template-columns:repeat(3,1fr)">
       <div class="mini"><b id="cpnActive">0</b><span>كوبون نشط</span></div>
@@ -536,7 +557,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
   </section>
 
   <!-- كمل احتياجك: اقتراحات المنتجات المكمّلة (أرقام مجمّعة فقط) -->
-  <div id="cxPanel" hidden aria-label="كمل احتياجك">
+  <div data-tab="cx" id="cxPanel" hidden aria-label="كمل احتياجك">
     <div class="panel-h" style="margin:6px 4px 12px">
       <div><h2 style="font-size:1.15rem">كمل احتياجك</h2><p id="cxSub">أداء اقتراحات المنتجات المكمّلة</p></div>
       <div class="seg" id="cxDays" role="group" aria-label="الفترة">
@@ -921,6 +942,18 @@ $('#prodSearch').addEventListener('input', renderProducts);
 $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProducts(); });
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
+/* ============ تبويبات اللوحة ============ */
+const TABS = ['overview','products','sales','cancel','ops','cx'];
+function setTab(t, keep){
+  if(!TABS.includes(t)) t = 'overview';
+  document.body.dataset.tab = t;
+  document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+  if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
+  requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
+}
+document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { setTab(b.dataset.t); window.scrollTo({top:0}); }));
+(function(){ let t = location.hash.slice(1); if(!TABS.includes(t)){ try{ t = localStorage.getItem('tab') || ''; }catch(e){ t = ''; } } setTab(t, true); })();
+
 /* ============ متوسط الشهور ============ */
 let mthData = null, mthChart = null, mthSeq = 0, mthAt = 0;
 function demoMonths(){
