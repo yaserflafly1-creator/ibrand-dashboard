@@ -157,6 +157,19 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
 }
 @media (max-width:380px){.grid-kpi{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* كمل احتياجك */
+.cmp{margin-top:18px}
+.cmp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.cmp-box{border:1px solid var(--border);border-radius:16px;padding:14px;background:var(--pink-50)}
+.cmp-box h3{font-size:.9rem;font-weight:600;margin-bottom:8px}
+.cmp-box .big{font-size:1.5rem;font-weight:700;letter-spacing:-.4px}
+.cmp-box .big small{font-size:.78rem;font-weight:500;color:var(--muted);margin-inline-start:4px}
+.cmp-box .row{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);margin-top:4px}
+.cmp-box .row b{color:var(--text);font-weight:600}
+.cmp-chart{height:200px}
+.cmp-note{font-size:.76rem;color:var(--muted);margin-top:10px}
+@media(max-width:760px){.cmp-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -259,7 +272,21 @@ footer{text-align:center;color:var(--muted);font-size:.76rem;margin-top:26px}
     </div>
   </section>
 
-  <footer>بيانات حقيقية من متجر اي براند على سلة · المبيعات شاملة التخفيضات مثل صفحة التقارير في سلة · تتحدث تلقائياً · أسماء العملاء مختصرة لحماية خصوصيتهم</footer>
+
+  <!-- كمل احتياجك: اقتراحات المنتجات المكمّلة (أرقام مجمّعة فقط) -->
+  <section class="card panel cmp" id="cmp" hidden aria-label="كمل احتياجك">
+    <div class="panel-h">
+      <div><h2>كمل احتياجك</h2><p>إضافات للسلة من اقتراحات المنتجات المكمّلة</p></div>
+      <div class="seg" id="cmpDays" role="group" aria-label="الفترة">
+        <button data-d="7">7 أيام</button><button data-d="30" class="on">30 يوم</button><button data-d="90">90 يوم</button>
+      </div>
+    </div>
+    <div class="cmp-grid" id="cmpBoxes"></div>
+    <div class="cmp-chart"><canvas id="cmpChart" dir="ltr"></canvas></div>
+    <p class="cmp-note">الظهور تقديري (يُسجَّل ظهور واحد من كل 5). الإضافات والنقرات دقيقة. أرقام مجمّعة فقط.</p>
+  </section>
+
+  <footer>بيانات حقيقية من متجر اي براند على سلة · المبيعات شاملة التخفيضات مثل صفحة التقارير في سلة · تتحدث تلقائياً · أسماء العملاء مختصرة لحماية خصوصيتهم · أرقام «كمل احتياجك» مجمّعة من تطبيق الاقتراحات</footer>
 </div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -553,6 +580,39 @@ async function load(first){
   }
 }
 
+
+/* ============ كمل احتياجك (أرقام مجمّعة من التطبيق) ============ */
+const CMP_URL = 'https://complement-app.ibrandsales.workers.dev/api/public-stats?s=1972477543';
+const CMP_SECTIONS = [['product','صفحة المنتج','#f9a8d4'],['cart','صفحة السلة','#ec4899'],['popup','بعد «أضف للسلة»','#9d174d']];
+let cmpChart = null, cmpDays = 30;
+async function loadCmp(){
+  try{
+    const res = await fetch(CMP_URL+'&days='+cmpDays);
+    if(!res.ok) throw new Error(res.status);
+    const d = await res.json();
+    const t = d.totals || {};
+    $('#cmpBoxes').innerHTML = CMP_SECTIONS.map(([k,name]) => {
+      const x = t[k] || {impressions:0,clicks:0,adds:0};
+      const rate = x.impressions ? (x.adds/x.impressions*100).toFixed(2) : '0';
+      return `<div class="cmp-box"><h3>${esc(name)}</h3><div class="big">${fmt(x.adds)}<small>إضافة للسلة</small></div>
+        <div class="row"><span>الظهور (تقديري)</span><b>${fmt(x.impressions)}</b></div>
+        <div class="row"><span>النقرات</span><b>${fmt(x.clicks)}</b></div>
+        <div class="row"><span>نسبة الإضافة إلى الظهور</span><b>${rate}%</b></div></div>`;
+    }).join('');
+    const days = d.daily || [];
+    const data = {labels: days.map(r => r.day.slice(5)), datasets: CMP_SECTIONS.map(([k,name,color]) => ({label:name, data:days.map(r => r[k].adds), backgroundColor:color, borderRadius:4}))};
+    const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}, scales:{x:{stacked:true,grid:{display:false}}, y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}};
+    if(cmpChart){ cmpChart.data = data; cmpChart.update(); } else cmpChart = new Chart($('#cmpChart'), {type:'bar', data, options:opts});
+    $('#cmp').hidden = false;
+  }catch(e){ /* the section just stays hidden if the app is unreachable */ }
+}
+$('#cmpDays').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  cmpDays = Number(b.dataset.d);
+  document.querySelectorAll('#cmpDays button').forEach(x => x.classList.toggle('on', x===b));
+  loadCmp();
+});
+
 /* ============ Init ============ */
 (function(){
   const h = new Date().getHours();
@@ -561,6 +621,8 @@ async function load(first){
   if(typeof Chart==='undefined'){ toast('تعذّر تحميل مكتبة الرسوم البيانية'); return; }
   Chart.defaults.font.family = "'IBM Plex Sans Arabic', sans-serif";
   load(true);
+  loadCmp();
+  setInterval(loadCmp, 10*60*1000);
   setInterval(() => load(false), 5*60*1000);   // يتحقق من وجود تحديث كل 5 دقائق
   setInterval(renderUpdated, 60*1000);
 })();
