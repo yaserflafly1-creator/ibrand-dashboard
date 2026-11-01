@@ -236,7 +236,7 @@ test('months: average over complete months only; endpoint requires auth and retu
   assert.equal((await worker.fetch(new Request('https://x.test/api/months'), env)).status, 401);
 });
 
-test('search-gaps: key stays server-side; friendly errors; Salla token required (not share); cached', async () => {
+test('search-gaps: key stays server-side; friendly errors; Salla token or share (first 50 rows); cached', async () => {
   const sample = { generated_at: 1793500000000, totals: { searches: 1840, zero_searches: 212, missing_phrases: 31, recovered_phrases: 18 },
     missing: [{ q: 'dermedic', total: 7, zero: 7, results: 0, first: 1, last: 2, evil: 'x' }], codes: [], recovered: [{ q: 'a', total: 3, zero: 1, results: 4, first: 1, last: 2 }], top: [] };
   let seen = null, status = 200;
@@ -254,5 +254,9 @@ test('search-gaps: key stays server-side; friendly errors; Salla token required 
   __clearMemo(); env = mk({ REPORT_KEY: undefined }); assert.equal((await (await get(env, '/api/search-gaps')).json()).error, 'not_configured');
   env = mk(); assert.equal((await worker.fetch(new Request('https://x.test/api/search-gaps'), env)).status, 401);
   const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
-  assert.equal((await worker.fetch(new Request('https://x.test/api/search-gaps', { headers: { authorization: 'Share ' + c.id } }), env)).status, 401);
+  sample.missing = Array.from({ length: 80 }, (_, i) => ({ q: 'q' + i, total: 1, zero: 1, results: 0, first: 1, last: 2 })); __clearMemo();
+  const sh = await worker.fetch(new Request('https://x.test/api/search-gaps', { headers: { authorization: 'Share ' + c.id } }), env);
+  assert.equal(sh.status, 200); const sj = await sh.json(); assert.equal(sj.missing.length, 50); assert.ok(!JSON.stringify(sj).includes('sekret-123'));
+  assert.equal((await (await get(env, '/api/search-gaps')).json()).missing.length, 80);   // توكن سلة: القائمة كاملة (حتى 500)
+  assert.equal((await worker.fetch(new Request('https://x.test/api/search-gaps', { headers: { authorization: 'Share ' + '0'.repeat(32) } }), env)).status, 401);
 });

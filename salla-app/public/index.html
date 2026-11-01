@@ -986,7 +986,7 @@ function buyList(){ const q = ($('#buyFilter').value||'').trim().toLowerCase(); 
 function renderBuy(){
   if(!$('#buyPanel')) return;
   if(!buyData){
-    $('#buyKpis').innerHTML = ''; $('#buyRows').innerHTML = `<tr><td colspan="5" class="empty">${esc(BUY_MSG[buyErr] || (buyErr==='unauthorized' ? 'هذا التقرير متاح داخل سلة فقط.' : 'جارٍ التحميل…'))}</td></tr>`; $('#buyNote').textContent = ''; return;
+    $('#buyKpis').innerHTML = ''; $('#buyRows').innerHTML = `<tr><td colspan="5" class="empty">${esc(BUY_MSG[buyErr] || (buyErr==='unauthorized' ? 'انتهت صلاحية الرابط.' : 'جارٍ التحميل…'))}</td></tr>`; $('#buyNote').textContent = ''; return;
   }
   const T = buyData.totals, pct = T.searches ? T.zero_searches/T.searches*100 : 0;
   $('#buyKpis').innerHTML = [[fmt(T.searches),'عمليات البحث'], [fmt(T.zero_searches)+' <small style="font-size:.8rem;color:var(--muted)">('+pct.toFixed(1)+'%)</small>','بحث بلا نتيجة'], [fmt(T.missing_phrases),'عبارات ما زالت مفقودة'], [fmt(T.recovered_phrases),'عبارات تم تدارك توفيرها']]
@@ -1868,7 +1868,7 @@ async function boot(){
     catch(e){ console.error('SDK init failed', e); }
   }
   if(SHARE){   // عرض للقراءة فقط: بلا أسماء عملاء/طلبات/كوبونات/شحن
-    ['cpnPanel','shpPanel','buyPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
+    ['cpnPanel','shpPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
     const ob = document.getElementById('orders'); const op = ob && ob.closest('.card'); if(op) op.hidden = true;
     const ex = document.getElementById('export'); if(ex) ex.hidden = true;
     setPreset('month'); loadInventory(); scheduleAuto(); return;
