@@ -1713,13 +1713,22 @@ function cxSum(rows){
 }
 const cxAll = t => CX_SECTIONS.reduce((a,[k]) => ({impressions:a.impressions+t[k].impressions, clicks:a.clicks+t[k].clicks, adds:a.adds+t[k].adds}), {impressions:0,clicks:0,adds:0});
 const cxPct = (a,b) => b ? a/b*100 : 0;
+const CX_SHOWN = 10, cxOpen = {};
 function cxList(el, rows, max){
-  $(el).innerHTML = rows.length ? rows.map((p,i) => `<li>
+  const more = rows.length > CX_SHOWN, open = !!cxOpen[el];
+  const shown = open ? rows : rows.slice(0, CX_SHOWN);
+  $(el).innerHTML = (shown.length ? shown.map((p,i) => `<li>
       <span class="rank">${i+1}</span>
       <div class="pimg" aria-hidden="true">${p.image?`<img src="${esc(p.image)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:14px">`:'🛍️'}</div>
       <div class="pinfo"><b>${esc(p.name)}</b><span>${fmt(p.adds)} إضافة</span><div class="bar"><i style="width:${p.adds/max*100}%"></i></div></div>
-    </li>`).join('') : '<li class="empty" style="display:block;border:0">لا توجد بيانات في هذه الفترة</li>';
+    </li>`).join('') : '<li class="empty" style="display:block;border:0">لا توجد بيانات في هذه الفترة</li>')
+    + (more ? `<li style="justify-content:center;padding:6px"><button type="button" class="btn" data-cx="${el}">${open ? 'عرض أقل' : `عرض الكل (${rows.length})`}</button></li>` : '');
 }
+document.addEventListener('click', e => {
+  const b = e.target.closest('button[data-cx]'); if(!b) return;
+  cxOpen[b.dataset.cx] = !cxOpen[b.dataset.cx];
+  loadCx();
+});
 async function loadCx(){
   try{
     if(typeof Chart==='undefined') return;
