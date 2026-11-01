@@ -244,14 +244,18 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* كمل احتياجك */
-.cx-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
-.cx-box{border:1px solid var(--border);border-radius:16px;padding:14px;background:var(--pink-50)}
-.cx-box h3{font-size:.9rem;font-weight:600;margin-bottom:8px}
-.cx-box .big{font-size:1.5rem;font-weight:700;letter-spacing:-.4px}
+.cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.cx-box{padding:16px}
+.cx-box h3{font-size:.92rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.cx-box h3 i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.cx-box .big{font-size:1.6rem;font-weight:700;letter-spacing:-.4px}
 .cx-box .big small{font-size:.78rem;font-weight:500;color:var(--muted);margin-inline-start:4px}
-.cx-box .row{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);margin-top:4px}
+.cx-box .row{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);margin-top:6px}
 .cx-box .row b{color:var(--text);font-weight:600}
-@media(max-width:760px){.cx-grid{grid-template-columns:1fr}}
+.cx-box .bar{margin-top:10px}
+@media(max-width:1000px){.cx-kpis{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.cx-boxes{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -532,17 +536,32 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
   </section>
 
   <!-- كمل احتياجك: اقتراحات المنتجات المكمّلة (أرقام مجمّعة فقط) -->
-  <section class="card panel sec" id="cxPanel" hidden aria-label="كمل احتياجك">
-    <div class="panel-h">
-      <div><h2>كمل احتياجك</h2><p>إضافات للسلة من اقتراحات المنتجات المكمّلة</p></div>
+  <div id="cxPanel" hidden aria-label="كمل احتياجك">
+    <div class="panel-h" style="margin:6px 4px 12px">
+      <div><h2 style="font-size:1.15rem">كمل احتياجك</h2><p id="cxSub">أداء اقتراحات المنتجات المكمّلة</p></div>
       <div class="seg" id="cxDays" role="group" aria-label="الفترة">
         <button type="button" data-d="7">7 أيام</button><button type="button" data-d="30" class="on">30 يوم</button><button type="button" data-d="90">90 يوم</button>
       </div>
     </div>
-    <div class="cx-grid" id="cxBoxes"></div>
-    <div class="chart-box" style="height:200px"><canvas id="cxChart" dir="ltr"></canvas></div>
-    <p class="period-note" style="margin:10px 0 0">الظهور تقديري (يُسجَّل ظهور واحد من كل 5). الإضافات والنقرات دقيقة. أرقام مجمّعة من تطبيق الاقتراحات.</p>
-  </section>
+    <section class="cx-kpis" id="cxKpis"></section>
+    <section class="grid-charts">
+      <div class="card panel">
+        <div class="panel-h"><div><h2>الإضافات للسلة يوميًا</h2><p>حسب موضع الاقتراح</p></div></div>
+        <div class="chart-box" style="height:250px"><canvas id="cxChart" dir="ltr"></canvas></div>
+      </div>
+      <div class="card panel">
+        <div class="panel-h"><div><h2>من أين جاءت الإضافات</h2><p id="cxDonutSub"></p></div></div>
+        <div class="donut-box"><canvas id="cxDonut"></canvas><div class="donut-center"><b id="cxDonutTotal">0</b><span>إضافة</span></div></div>
+        <div class="legend" id="cxLegend"></div>
+      </div>
+    </section>
+    <section class="cx-boxes" id="cxBoxes"></section>
+    <section class="grid-bottom sec">
+      <div class="card panel"><div class="panel-h"><div><h2>أكثر المنتجات إضافةً للسلة</h2><p>من اقتراحات «كمل احتياجك»</p></div></div><ul class="top-list" id="cxTop"></ul></div>
+      <div class="card panel"><div class="panel-h"><div><h2>أكثر الصفحات التي أنتجت إضافات</h2><p>المنتج الذي كان الزبون يتصفحه</p></div></div><ul class="top-list" id="cxSrc"></ul></div>
+    </section>
+    <p class="period-note sec" style="margin:0 4px 18px">الظهور تقديري (يُسجَّل ظهور واحد من كل 5). الإضافات والنقرات دقيقة. المقارنة مع الفترة السابقة لها نفس الطول. هذه الأرقام عدد إضافات للسلة وليست مبيعات مؤكدة.</p>
+  </div>
 
   <dialog id="calDlg" class="cal-dlg"><div class="dlg" id="calBody"></div></dialog>
   <dialog id="shareDlg"><div class="dlg" id="shareDlgBody"></div></dialog>
@@ -1637,26 +1656,81 @@ document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ shN
 /* ============ كمل احتياجك (أرقام مجمّعة من تطبيق الاقتراحات) ============ */
 const CX_URL = 'https://complement-app.ibrandsales.workers.dev/api/public-stats?s=1972477543';
 const CX_SECTIONS = [['product','صفحة المنتج','#f9a8d4'],['cart','صفحة السلة','#ec4899'],['popup','بعد «أضف للسلة»','#9d174d']];
-let cxChart = null, cxDays = 30;
+const CX_ICON = {
+  adds:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h8.7a1 1 0 0 0 1-.8L20 8H6"/></svg>',
+  rate:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>',
+  click:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9l10 4-4.5 1.5L13 19z"/><path d="M5 3v3M3 5h3M7.5 7.5L9 9"/></svg>',
+  star:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>'
+};
+let cxChart = null, cxDonut = null, cxDays = 30;
+function cxSum(rows){
+  const t = {product:{impressions:0,clicks:0,adds:0}, cart:{impressions:0,clicks:0,adds:0}, popup:{impressions:0,clicks:0,adds:0}};
+  for(const r of rows) for(const [k] of CX_SECTIONS) for(const m of ['impressions','clicks','adds']) t[k][m] += (r[k] && r[k][m]) || 0;
+  return t;
+}
+const cxAll = t => CX_SECTIONS.reduce((a,[k]) => ({impressions:a.impressions+t[k].impressions, clicks:a.clicks+t[k].clicks, adds:a.adds+t[k].adds}), {impressions:0,clicks:0,adds:0});
+const cxPct = (a,b) => b ? a/b*100 : 0;
+function cxList(el, rows, max){
+  $(el).innerHTML = rows.length ? rows.map((p,i) => `<li>
+      <span class="rank">${i+1}</span>
+      <div class="pimg" aria-hidden="true">${p.image?`<img src="${esc(p.image)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:14px">`:'🛍️'}</div>
+      <div class="pinfo"><b>${esc(p.name)}</b><span>${fmt(p.adds)} إضافة</span><div class="bar"><i style="width:${p.adds/max*100}%"></i></div></div>
+    </li>`).join('') : '<li class="empty" style="display:block;border:0">لا توجد بيانات في هذه الفترة</li>';
+}
 async function loadCx(){
   try{
     if(typeof Chart==='undefined') return;
-    const res = await fetch(CX_URL+'&days='+cxDays);
+    const N = cxDays;
+    const res = await fetch(`${CX_URL}&days=${N*2}&top=${N}`);
     if(!res.ok) throw new Error(res.status);
     const d = await res.json();
-    const t = d.totals || {};
-    $('#cxBoxes').innerHTML = CX_SECTIONS.map(([k,name]) => {
-      const x = t[k] || {impressions:0,clicks:0,adds:0};
-      const rate = x.impressions ? (x.adds/x.impressions*100).toFixed(2) : '0';
-      return `<div class="cx-box"><h3>${esc(name)}</h3><div class="big">${fmt(x.adds)}<small>إضافة للسلة</small></div>
+    // الفترة الحالية = آخر N يوم، والسابقة = N يوم قبلها (بتوقيت الرياض)
+    const day = k => new Date(Date.now() + 3*3600e3 - k*864e5).toISOString().slice(0,10);
+    const c1 = day(N), c0 = day(2*N);
+    const rows = d.daily || [];
+    const curRows = rows.filter(r => r.day > c1), prevRows = rows.filter(r => r.day > c0 && r.day <= c1);
+    const cur = cxSum(curRows), prev = cxSum(prevRows), A = cxAll(cur), P = cxAll(prev);
+    const rateC = cxPct(A.adds, A.impressions), rateP = cxPct(P.adds, P.impressions);
+    const best = CX_SECTIONS.map(([k,name]) => [name, cur[k].adds]).sort((a,b) => b[1]-a[1])[0];
+    const kpis = [
+      {k:'adds', cls:'hero', lbl:'إضافات للسلة', val:fmt(A.adds), unit:'إضافة', d:deltaHTML(A.adds, P.adds), sub:`من ${fmt(A.clicks)} نقرة`},
+      {k:'rate', lbl:'نسبة الإضافة إلى الظهور', val:rateC.toFixed(2)+'%', d:deltaHTML(rateC, rateP), sub:`الظهور (تقديري): ${fmt(A.impressions)}`},
+      {k:'click', lbl:'النقرات على الاقتراحات', val:fmt(A.clicks), d:deltaHTML(A.clicks, P.clicks), sub:`نسبة النقر: ${cxPct(A.clicks, A.impressions).toFixed(2)}%`},
+      {k:'star', lbl:'أفضل موضع', val:best && best[1] ? best[0] : '—', d:'', sub:best && best[1] ? `${fmt(best[1])} إضافة (${cxPct(best[1], A.adds).toFixed(0)}% من الإجمالي)` : ''}
+    ];
+    $('#cxKpis').innerHTML = kpis.map(i => `
+      <article class="card kpi ${i.cls||''}">
+        <div class="ico">${CX_ICON[i.k]}</div>
+        <div class="lbl">${i.lbl}</div>
+        <div class="val" ${i.k==='star'?'style="font-size:1.25rem"':''}>${i.val}${i.unit?`<small>${i.unit}</small>`:''}</div>
+        ${i.d?`<div>${i.d} <span class="sub" style="margin-inline-start:4px">عن الفترة السابقة</span></div>`:''}
+        ${i.sub?`<div class="sub">${i.sub}</div>`:''}
+      </article>`).join('');
+    $('#cxBoxes').innerHTML = CX_SECTIONS.map(([k,name,color]) => {
+      const x = cur[k], max = Math.max(1, ...CX_SECTIONS.map(([j]) => cur[j].adds));
+      return `<div class="card cx-box"><h3><i style="background:${color}"></i>${esc(name)}</h3>
+        <div class="big">${fmt(x.adds)}<small>إضافة للسلة</small> ${deltaHTML(x.adds, prev[k].adds)}</div>
         <div class="row"><span>الظهور (تقديري)</span><b>${fmt(x.impressions)}</b></div>
         <div class="row"><span>النقرات</span><b>${fmt(x.clicks)}</b></div>
-        <div class="row"><span>نسبة الإضافة إلى الظهور</span><b>${rate}%</b></div></div>`;
+        <div class="row"><span>نسبة الإضافة إلى الظهور</span><b>${cxPct(x.adds, x.impressions).toFixed(2)}%</b></div>
+        <div class="bar"><i style="width:${x.adds/max*100}%"></i></div></div>`;
     }).join('');
-    const days = d.daily || [];
-    const data = {labels: days.map(r => r.day.slice(5)), datasets: CX_SECTIONS.map(([k,name,color]) => ({label:name, data:days.map(r => r[k].adds), backgroundColor:color, borderRadius:4}))};
-    const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}, scales:{x:{stacked:true,grid:{display:false}}, y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}};
+    // الرسم اليومي (كل يوم من الفترة الحالية حتى الأيام الفارغة)
+    const byDay = new Map(curRows.map(r => [r.day, r]));
+    const labels = []; for(let k = N-1; k >= 0; k--) labels.push(day(k));
+    const data = {labels: labels.map(l => l.slice(5)), datasets: CX_SECTIONS.map(([k,name,color]) => ({label:name, data:labels.map(l => (byDay.get(l) || {})[k] ? byDay.get(l)[k].adds : 0), backgroundColor:color, borderRadius:4}))};
+    const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}, scales:{x:{stacked:true,grid:{display:false},ticks:{maxTicksLimit:12}}, y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}};
     if(cxChart){ cxChart.data = data; cxChart.update(); } else cxChart = new Chart($('#cxChart'), {type:'bar', data, options:opts});
+    // الدونات
+    const dd = {labels: CX_SECTIONS.map(x => x[1]), datasets:[{data: CX_SECTIONS.map(([k]) => cur[k].adds), backgroundColor: CX_SECTIONS.map(x => x[2]), borderWidth:0}]};
+    const dopts = {cutout:'68%', plugins:{legend:{display:false}}, maintainAspectRatio:false};
+    if(cxDonut){ cxDonut.data = dd; cxDonut.update(); } else cxDonut = new Chart($('#cxDonut'), {type:'doughnut', data:dd, options:dopts});
+    $('#cxDonutTotal').textContent = fmt(A.adds);
+    $('#cxDonutSub').textContent = `آخر ${N} يوم`;
+    $('#cxLegend').innerHTML = CX_SECTIONS.map(([k,name,color]) => `<div><i style="background:${color};width:10px;height:10px;border-radius:50%;display:inline-block"></i>${esc(name)}<span class="n">${fmt(cur[k].adds)}</span><span class="p">${cxPct(cur[k].adds, A.adds).toFixed(0)}%</span></div>`).join('');
+    const ta = d.top_added || [], ts = d.top_sources || [];
+    cxList('#cxTop', ta, Math.max(1, ...ta.map(x => x.adds)));
+    cxList('#cxSrc', ts, Math.max(1, ...ts.map(x => x.adds)));
     $('#cxPanel').hidden = false;
   }catch(e){ console.warn('complement stats', e); /* the section stays hidden if the suggestions app is unreachable */ }
 }
