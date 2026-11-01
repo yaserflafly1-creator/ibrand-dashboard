@@ -242,6 +242,16 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 }
 @media (max-width:380px){.grid-kpi{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* كمل احتياجك */
+.cx-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.cx-box{border:1px solid var(--border);border-radius:16px;padding:14px;background:var(--pink-50)}
+.cx-box h3{font-size:.9rem;font-weight:600;margin-bottom:8px}
+.cx-box .big{font-size:1.5rem;font-weight:700;letter-spacing:-.4px}
+.cx-box .big small{font-size:.78rem;font-weight:500;color:var(--muted);margin-inline-start:4px}
+.cx-box .row{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);margin-top:4px}
+.cx-box .row b{color:var(--text);font-weight:600}
+@media(max-width:760px){.cx-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -519,6 +529,19 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
         <tbody id="cpnRows"></tbody>
       </table>
     </div>
+  </section>
+
+  <!-- كمل احتياجك: اقتراحات المنتجات المكمّلة (أرقام مجمّعة فقط) -->
+  <section class="card panel sec" id="cxPanel" hidden aria-label="كمل احتياجك">
+    <div class="panel-h">
+      <div><h2>كمل احتياجك</h2><p>إضافات للسلة من اقتراحات المنتجات المكمّلة</p></div>
+      <div class="seg" id="cxDays" role="group" aria-label="الفترة">
+        <button type="button" data-d="7">7 أيام</button><button type="button" data-d="30" class="on">30 يوم</button><button type="button" data-d="90">90 يوم</button>
+      </div>
+    </div>
+    <div class="cx-grid" id="cxBoxes"></div>
+    <div class="chart-box" style="height:200px"><canvas id="cxChart" dir="ltr"></canvas></div>
+    <p class="period-note" style="margin:10px 0 0">الظهور تقديري (يُسجَّل ظهور واحد من كل 5). الإضافات والنقرات دقيقة. أرقام مجمّعة من تطبيق الاقتراحات.</p>
   </section>
 
   <dialog id="calDlg" class="cal-dlg"><div class="dlg" id="calBody"></div></dialog>
@@ -1610,6 +1633,40 @@ async function shareList(){
   body.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try{ await api('/api/share?id='+b.dataset.del, {method:'DELETE'}); }catch(e){} shareList(); });
 }
 document.addEventListener('click', e => { if(e.target.closest('#shareBtn')){ shNewUrl = ''; shNewLabel = ''; $('#shareDlg').showModal(); shareList(); } });
+
+/* ============ كمل احتياجك (أرقام مجمّعة من تطبيق الاقتراحات) ============ */
+const CX_URL = 'https://complement-app.ibrandsales.workers.dev/api/public-stats?s=1972477543';
+const CX_SECTIONS = [['product','صفحة المنتج','#f9a8d4'],['cart','صفحة السلة','#ec4899'],['popup','بعد «أضف للسلة»','#9d174d']];
+let cxChart = null, cxDays = 30;
+async function loadCx(){
+  try{
+    if(typeof Chart==='undefined') return;
+    const res = await fetch(CX_URL+'&days='+cxDays);
+    if(!res.ok) throw new Error(res.status);
+    const d = await res.json();
+    const t = d.totals || {};
+    $('#cxBoxes').innerHTML = CX_SECTIONS.map(([k,name]) => {
+      const x = t[k] || {impressions:0,clicks:0,adds:0};
+      const rate = x.impressions ? (x.adds/x.impressions*100).toFixed(2) : '0';
+      return `<div class="cx-box"><h3>${esc(name)}</h3><div class="big">${fmt(x.adds)}<small>إضافة للسلة</small></div>
+        <div class="row"><span>الظهور (تقديري)</span><b>${fmt(x.impressions)}</b></div>
+        <div class="row"><span>النقرات</span><b>${fmt(x.clicks)}</b></div>
+        <div class="row"><span>نسبة الإضافة إلى الظهور</span><b>${rate}%</b></div></div>`;
+    }).join('');
+    const days = d.daily || [];
+    const data = {labels: days.map(r => r.day.slice(5)), datasets: CX_SECTIONS.map(([k,name,color]) => ({label:name, data:days.map(r => r[k].adds), backgroundColor:color, borderRadius:4}))};
+    const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}, scales:{x:{stacked:true,grid:{display:false}}, y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}};
+    if(cxChart){ cxChart.data = data; cxChart.update(); } else cxChart = new Chart($('#cxChart'), {type:'bar', data, options:opts});
+    $('#cxPanel').hidden = false;
+  }catch(e){ console.warn('complement stats', e); /* the section stays hidden if the suggestions app is unreachable */ }
+}
+$('#cxDays').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  cxDays = Number(b.dataset.d);
+  document.querySelectorAll('#cxDays button').forEach(x => x.classList.toggle('on', x===b));
+  loadCx();
+});
+if(typeof Chart!=='undefined'){ loadCx(); setInterval(loadCx, 10*60*1000); }
 
 async function boot(){
   if(LIVE && SDK && !SHARE){
