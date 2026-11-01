@@ -243,6 +243,8 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (max-width:380px){.grid-kpi{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
+.buy-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px}
+@media (max-width:640px){#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
 /* تبويبات اللوحة: كل قسم يحمل data-tab؛ الأقسام الجديدة تُضاف بإعطائها data-tab فقط */
 .tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 12px;position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg,#fdf2f8) 78%,transparent);scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -254,6 +256,7 @@ body[data-tab="sales"] [data-tab]:not([data-tab="sales"]){display:none!important
 body[data-tab="cancel"] [data-tab]:not([data-tab="cancel"]){display:none!important}
 body[data-tab="ops"] [data-tab]:not([data-tab="ops"]){display:none!important}
 body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
+body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
 /* كمل احتياجك */
 .cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
@@ -333,6 +336,7 @@ body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
     <button type="button" role="tab" data-t="sales">العملاء والمبيعات</button>
     <button type="button" role="tab" data-t="cancel">الملغي</button>
     <button type="button" role="tab" data-t="ops">المخزون والشحن</button>
+    <button type="button" role="tab" data-t="buy">المشتريات</button>
     <button type="button" role="tab" data-t="cx">كمل احتياجك</button>
   </nav>
 
@@ -554,6 +558,22 @@ body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
         <tbody id="cpnRows"></tbody>
       </table>
     </div>
+  </section>
+
+  <section data-tab="buy" class="card panel sec" id="buyPanel">
+    <div class="panel-h">
+      <div><h2>ما يبحث عنه الزوار ولا نملكه</h2><p id="buySub">من خدمة البحث في المتجر · للمشتريات</p></div>
+      <button class="btn" id="buyExport" type="button">تصدير CSV</button>
+    </div>
+    <div class="mini-kpis" id="buyKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="buy-tools">
+      <div class="seg" id="buyMode" role="group" aria-label="نوع القائمة">
+        <button type="button" data-m="missing" class="on">مفقودة</button><button type="button" data-m="codes">باركودات وأرقام</button><button type="button" data-m="recovered">تم تداركها</button><button type="button" data-m="top">الأكثر بحثاً</button>
+      </div>
+      <input id="buyFilter" type="search" placeholder="ابحث في العبارات…" autocomplete="off" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit;min-width:180px">
+    </div>
+    <div class="tbl-wrap"><table><thead><tr><th>العبارة</th><th>مرات البحث</th><th>بلا نتيجة</th><th>الحالة الآن</th><th>آخر مرة</th></tr></thead><tbody id="buyRows"></tbody></table></div>
+    <p class="period-note" id="buyNote" style="margin:10px 0 0"></p>
   </section>
 
   <!-- كمل احتياجك: اقتراحات المنتجات المكمّلة (أرقام مجمّعة فقط) -->
@@ -942,13 +962,61 @@ $('#prodSearch').addEventListener('input', renderProducts);
 $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProducts(); });
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
+/* ============ المشتريات: ما يبحث عنه الزوار ولا نملكه (من خدمة البحث عبر الخادم؛ السر لا يصل المتصفح أبداً) ============ */
+let buyData = null, buyErr = '', buyMode = 'missing', buyAt = 0, buySeq = 0;
+const BUY_MSG = {not_configured:'تقرير البحث غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
+function demoBuy(){
+  const now = Date.now(), d = k => now - k*864e5, row = (q,total,zero,results,k) => ({q, total, zero, results, first:d(k+20), last:d(k)});
+  return {generated_at:now, totals:{searches:1840, zero_searches:212, missing_phrases:6, recovered_phrases:2},
+    missing:[row('ديرميديك',14,14,0,1), row('بيبي دريم',9,9,0,2), row('كريم اساس',7,7,0,3), row('اوميغا 3 اطفال',5,5,0,5), row('شامبو الكيرتين',4,4,0,6), row('حفاضات بالغين',3,3,0,9)],
+    codes:[row('6281006422211',4,4,0,2), row('5000158062153',2,2,0,7)], recovered:[row('بامبرز',22,6,18,4), row('سيريلاك',15,3,9,8)],
+    top:[row('حفاضات',210,0,41,0), row('حليب',188,2,37,0), row('سيميلاك',120,0,12,1), row('بنادول',96,1,5,1)]};
+}
+async function loadBuy(force){
+  if(!force && buyData && Date.now()-buyAt < 300e3) return;
+  const seq = ++buySeq;
+  try{
+    const d = LIVE ? await api('/api/search-gaps') : demoBuy();
+    if(seq !== buySeq) return;
+    if(d.error){ buyErr = d.error; buyData = null; } else { buyErr = ''; buyData = d; buyAt = Date.now(); }
+  }catch(e){ if(seq !== buySeq) return; buyErr = e.status===401 ? 'unauthorized' : 'unreachable'; buyData = null; }
+  renderBuy();
+}
+function buyList(){ const q = ($('#buyFilter').value||'').trim().toLowerCase(); return ((buyData && buyData[buyMode]) || []).filter(x => !q || x.q.toLowerCase().includes(q)); }
+function renderBuy(){
+  if(!$('#buyPanel')) return;
+  if(!buyData){
+    $('#buyKpis').innerHTML = ''; $('#buyRows').innerHTML = `<tr><td colspan="5" class="empty">${esc(BUY_MSG[buyErr] || (buyErr==='unauthorized' ? 'هذا التقرير متاح داخل سلة فقط.' : 'جارٍ التحميل…'))}</td></tr>`; $('#buyNote').textContent = ''; return;
+  }
+  const T = buyData.totals, pct = T.searches ? T.zero_searches/T.searches*100 : 0;
+  $('#buyKpis').innerHTML = [[fmt(T.searches),'عمليات البحث'], [fmt(T.zero_searches)+' <small style="font-size:.8rem;color:var(--muted)">('+pct.toFixed(1)+'%)</small>','بحث بلا نتيجة'], [fmt(T.missing_phrases),'عبارات ما زالت مفقودة'], [fmt(T.recovered_phrases),'عبارات تم تدارك توفيرها']]
+    .map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
+  const rows = buyList();
+  $('#buyRows').innerHTML = rows.length ? rows.map(x => `<tr><td dir="auto">${esc(x.q)}</td><td>${fmt(x.total)}</td><td>${fmt(x.zero)}</td>
+    <td>${x.results>0 ? `<span style="color:#16a34a;font-weight:700">متوفر (${fmt(x.results)})</span>` : '<span style="color:#dc2626;font-weight:700">غير موجود</span>'}</td>
+    <td>${x.last ? fmtDate(x.last) : '—'}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">لا توجد نتائج</td></tr>';
+  $('#buyNote').textContent = `آخر تحديث للتقرير: ${buyData.generated_at ? new Date(buyData.generated_at).toLocaleString('en-GB') : '—'}. الأرقام تخص عمليات البحث المرسلة بالإنتر أو بالضغط على نتيجة فقط، فهي أقل من الحقيقي.`;
+}
+document.querySelectorAll('#buyMode button').forEach(b => b.addEventListener('click', () => { buyMode = b.dataset.m; document.querySelectorAll('#buyMode button').forEach(x => x.classList.toggle('on', x===b)); renderBuy(); }));
+$('#buyFilter').addEventListener('input', () => { if(buyData) renderBuy(); });
+$('#buyExport').addEventListener('click', () => {
+  if(!buyData) return;
+  const cell = v => { let t = String(v ?? ''); if(/^[=+@-]/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
+  const head = ['العبارة','مرات البحث','بلا نتيجة','عدد النتائج الآن','الحالة الآن','آخر مرة'];
+  const body = buyList().map(x => [x.q, x.total, x.zero, x.results, x.results>0 ? 'متوفر' : 'غير موجود', x.last ? new Date(x.last).toISOString().slice(0,10) : '']);
+  const csv = '\uFEFF' + [head, ...body].map(r => r.map(cell).join(',')).join('\n') + '\n';
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'})); a.download = `search-${buyMode}-${ymd(new Date())}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
 /* ============ تبويبات اللوحة ============ */
-const TABS = ['overview','products','sales','cancel','ops','cx'];
+const TABS = ['overview','products','sales','cancel','ops','buy','cx'];
 function setTab(t, keep){
   if(!TABS.includes(t)) t = 'overview';
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
+  if(t==='buy') setTimeout(() => loadBuy(), 0);
   requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { setTab(b.dataset.t); window.scrollTo({top:0}); }));
@@ -1800,7 +1868,7 @@ async function boot(){
     catch(e){ console.error('SDK init failed', e); }
   }
   if(SHARE){   // عرض للقراءة فقط: بلا أسماء عملاء/طلبات/كوبونات/شحن
-    ['cpnPanel','shpPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
+    ['cpnPanel','shpPanel','buyPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
     const ob = document.getElementById('orders'); const op = ob && ob.closest('.card'); if(op) op.hidden = true;
     const ex = document.getElementById('export'); if(ex) ex.hidden = true;
     setPreset('month'); loadInventory(); scheduleAuto(); return;

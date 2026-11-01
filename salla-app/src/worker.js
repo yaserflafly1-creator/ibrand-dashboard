@@ -363,6 +363,32 @@ async function handleMonths(req, env) {
   return new Response(text, { headers: { 'content-type': 'application/json' } });
 }
 
+/* ---------- /api/search-gaps: ما يبحث عنه الزوار ولا نملكه (من خدمة ibrand-search؛ للمشتريات) ----------
+   الرقم السري REPORT_KEY سر Worker يُقرأ من الخادم فقط ولا يصل المتصفح؛ توكن سلة مطلوب (لا يُتاح عبر روابط المشاركة لأن العبارات نصوص يكتبها الزوار) */
+const SEARCH_DEFAULT_URL = 'https://ibrand-search.ibrandsales.workers.dev/report/data';
+const gapRows = (a) => (Array.isArray(a) ? a : []).slice(0, 500).map((x) => ({ q: String(x?.q ?? '').slice(0, 120), total: Number(x?.total) || 0, zero: Number(x?.zero) || 0, results: Number(x?.results) || 0, first: Number(x?.first) || 0, last: Number(x?.last) || 0 }));
+async function handleSearchGaps(req, env) {
+  const ctx = await authContext(req, env);
+  if (ctx.res) return ctx.res;
+  if (!env.REPORT_KEY) return json({ error: 'not_configured' });
+  try {
+    const hit = memoStore.get('searchgaps');
+    if (hit && hit.exp > Date.now()) return new Response(hit.v, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    const init = { headers: { 'x-report-key': env.REPORT_KEY } };
+    const r = env.SEARCH ? await env.SEARCH.fetch('https://search.internal/report/data', init) : await fetch(env.SEARCH_URL || SEARCH_DEFAULT_URL, init);
+    if (r.status === 401) return json({ error: 'bad_key' });
+    if (r.status === 503) return json({ error: 'disabled' });
+    if (!r.ok) return json({ error: 'unreachable', status: r.status });
+    const d = await r.json();
+    const t = d.totals || {};
+    const text = JSON.stringify({ generated_at: Number(d.generated_at) || 0, totals: { searches: Number(t.searches) || 0, zero_searches: Number(t.zero_searches) || 0, missing_phrases: Number(t.missing_phrases) || 0, recovered_phrases: Number(t.recovered_phrases) || 0 },
+      missing: gapRows(d.missing), codes: gapRows(d.codes), recovered: gapRows(d.recovered), top: gapRows(d.top) });
+    if (memoStore.size > 120) memoStore.clear();
+    memoStore.set('searchgaps', { v: text, exp: Date.now() + 300e3 });   // أخطاء الخدمة لا تُخزَّن
+    return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  } catch (e) { return json({ error: 'unreachable' }); }
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -465,6 +491,7 @@ export default {
       if (pathname === '/api/share' && ['GET', 'POST', 'DELETE'].includes(req.method)) return await handleShare(req, env);
       if (pathname === '/api/export.csv' && req.method === 'GET') return await handleExport(req, env);
       if (pathname === '/api/months' && req.method === 'GET') return await handleMonths(req, env);
+      if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);

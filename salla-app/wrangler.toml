@@ -19,6 +19,11 @@ database_name = "ibrand-sales"
 # أنشئها: npx wrangler d1 create ibrand-sales ثم ضع الـ database_id هنا
 database_id = "99b751e0-1b30-41ec-8db1-99a08b363ab8"
 
+# خدمة البحث (Worker على نفس الحساب): تقرير «ما يبحث عنه الزوار ولا نملكه». يجب أن تكون منشورة قبل نشر الداشبورد
+[[services]]
+binding = "SEARCH"
+service = "ibrand-search"
+
 # مزامنة الخلفية كل دقيقة (تجلب الطلبات تدريجياً وتحفظ ملخصات يومية)
 [triggers]
 crons = ["* * * * *"]
@@ -37,3 +42,4 @@ SALLA_APP_ID = "1866862647"
 
 # الأسرار (لا تُكتب هنا): npx wrangler secret put SALLA_CLIENT_ID
 #   SALLA_CLIENT_ID, SALLA_CLIENT_SECRET, SALLA_WEBHOOK_SECRET
+#   REPORT_KEY (رقم تقرير خدمة البحث؛ للقراءة فقط): npx wrangler secret put REPORT_KEY
