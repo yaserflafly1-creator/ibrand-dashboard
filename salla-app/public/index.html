@@ -952,6 +952,16 @@ function setTab(t, keep){
   requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { setTab(b.dataset.t); window.scrollTo({top:0}); }));
+// تبويب بلا أي قسم ظاهر (مثل المخزون/الشحن/الكوبونات عند تعطيلها) يُخفى، ويرجع العرض لـ«نظرة عامة» إن كان مفتوحاً
+const tabHasContent = t => [...document.querySelectorAll(`[data-tab="${t}"]`)].some(e => e!==document.body && !e.hidden && e.style.display!=='none');
+let tabsRaf = 0;
+function refreshTabs(){
+  tabsRaf = 0;
+  document.querySelectorAll('#tabs button').forEach(b => { b.hidden = !tabHasContent(b.dataset.t); });
+  if(document.body.dataset.tab !== 'overview' && !tabHasContent(document.body.dataset.tab)) setTab('overview', true);
+}
+new MutationObserver(() => { if(!tabsRaf) tabsRaf = requestAnimationFrame(refreshTabs); }).observe(document.body, {subtree:true, attributes:true, attributeFilter:['hidden','style'], childList:true});
+setTimeout(refreshTabs, 0);
 (function(){ let t = location.hash.slice(1); if(!TABS.includes(t)){ try{ t = localStorage.getItem('tab') || ''; }catch(e){ t = ''; } } setTab(t, true); })();
 
 /* ============ متوسط الشهور ============ */
