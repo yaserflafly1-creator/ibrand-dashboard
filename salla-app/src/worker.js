@@ -394,6 +394,13 @@ async function handleSearchGaps(req, env) {
 /* ---------- /api/care-orders: الطلبات المنشأة من فريق خدمة العملاء (طلبات عليها وسم «Customer Care Team») ----------
    يُفلتر في سلة بمعرّف الوسم (CARE_TAG_ID). أرقام مجمّعة فقط بلا بيانات عملاء، فتُتاح أيضاً عبر روابط المشاركة. */
 const CARE_MAX_PAGES = 100, CARE_DEFAULT_TAG = '52805995';
+/* وسوم خدمة العملاء: «Customer Care Team» و«customer Care Team» وسمان مختلفان في سلة. نقرأ قائمة وسوم الطلبات ونطابق الاسم بلا حساسية لحالة الأحرف،
+   ونضيف المعرّفات من CARE_TAG_IDS (مفصولة بفاصلة) احتياطاً إن تعذّرت قراءة القائمة */
+const careTagIds = (env, merchant, get) => memo(`caretags:${merchant}`, 600e3, async () => {
+  const ids = new Set(String(env.CARE_TAG_IDS || env.CARE_TAG_ID || CARE_DEFAULT_TAG).split(',').map((x) => x.trim()).filter(Boolean));
+  try { const j = await get('/orders/tags', {}); for (const t of j.data || []) if (/^customer care team$/i.test(String(t.name || '').trim())) ids.add(String(t.id)); } catch (e) { /* القائمة غير متاحة: نكتفي بالمعرّفات المضبوطة */ }
+  return [...ids];
+});
 async function handleCare(req, env) {
   const ctx = await dataContext(req, env);
   if (ctx.res) return ctx.res;
@@ -402,19 +409,24 @@ async function handleCare(req, env) {
   let from = q.get('from'), to = q.get('to');
   if (from > to) [from, to] = [to, from];
   if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > 800) return json({ error: 'range too long' }, 400);
-  const tag = String(env.CARE_TAG_ID || CARE_DEFAULT_TAG);
   const ttl = to < riyadhDay(Date.now()) ? 600e3 : 90e3;
   const wantList = q.get('list') === '1' && !ctx.shared;   // قائمة الطلبات (رقم/تاريخ/حالة/قيمة) بلا بيانات عملاء؛ لتوكن سلة فقط
   try {
-    const text = await memo(`care:${ctx.merchant}:${tag}:${from}:${to}:${wantList ? 'l' : ''}`, ttl, async () => {
+    const text = await memo(`care:${ctx.merchant}:${from}:${to}:${wantList ? 'l' : ''}`, ttl, async () => {
       const get = ctx.get || makeClient(env, ctx.merchant, await (async () => { const t = await loadTokens(env, ctx.merchant); if (!t) throw new Error('salla 403 app not installed'); return t; })());
-      const page = (n, tagged) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...(tagged ? { 'tags[0]': tag } : {}) });
-      const [first, plain] = await Promise.all([page(1, true), page(1, false)]);
-      const taggedTotal = first.pagination?.total ?? 0, plainTotal = plain.pagination?.total ?? 0;
-      if (plainTotal > 30 && taggedTotal >= plainTotal) throw Object.assign(new Error('tag filter ignored'), { careErr: 'tag_filter_ignored' });   // لا نعرض كل الطلبات على أنها طلبات الفريق
-      const pages = first.pagination?.totalPages || 1;
-      if (pages > CARE_MAX_PAGES) throw Object.assign(new Error('too many orders'), { careErr: 'too_many' });
-      const batches = [first, ...(pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, true)) : [])];
+      const tagIds = await careTagIds(env, ctx.merchant, get);
+      const page = (n, tag) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...(tag ? { 'tags[0]': tag } : {}) });
+      const plain = await page(1, null), plainTotal = plain.pagination?.total ?? 0;
+      const byId = new Map();   // طلب عليه الوسمان يُحسب مرة واحدة
+      for (const tag of tagIds) {
+        const first = await page(1, tag), tot = first.pagination?.total ?? 0;
+        if (plainTotal > 30 && tot >= plainTotal) throw Object.assign(new Error('tag filter ignored'), { careErr: 'tag_filter_ignored' });   // لا نعرض كل الطلبات على أنها طلبات الفريق
+        const pages = first.pagination?.totalPages || 1;
+        if (pages > CARE_MAX_PAGES) throw Object.assign(new Error('too many orders'), { careErr: 'too_many' });
+        const rest = pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, tag)) : [];
+        for (const o of [first, ...rest].flatMap((j) => j.data || [])) byId.set(o.id, o);
+      }
+      const batches = [{ data: [...byId.values()] }];
       const days = {}, status = {}, pay = {}, names = {}, list = [];
       let valid = 0, revenue = 0, canceled = 0, canceledValue = 0, unpaid = 0, all = 0;
       for (const o of batches.flatMap((j) => j.data || [])) {
@@ -435,7 +447,7 @@ async function handleCare(req, env) {
       const totals = await rangeTotals(env.DB, ctx.merchant, from, to);
       const r2 = (n) => Math.round(n * 100) / 100;
       list.sort((a, b) => (a[0] < b[0] ? -1 : 1));
-      return JSON.stringify({ tag, ...(wantList ? { rows: list } : {}), statusNames: Object.entries(names).sort((a, b) => b[1] - a[1]), orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
+      return JSON.stringify({ tags: tagIds, ...(wantList ? { rows: list } : {}), statusNames: Object.entries(names).sort((a, b) => b[1] - a[1]), orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
         series: Object.entries(days).sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, [n, v]]) => [d, n, r2(v)]),
         pay: Object.entries(pay).map(([k, [n, v]]) => ({ k, orders: n, total: r2(v) })).sort((a, b) => b.total - a.total),
         all: totals, shareOrders: totals.orders ? r2(valid / totals.orders * 100) : 0, shareRevenue: totals.revenue ? r2(revenue / totals.revenue * 100) : 0 });

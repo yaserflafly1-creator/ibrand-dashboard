@@ -1030,7 +1030,9 @@ function renderCare(){
   const ST = {completed:'مكتمل', shipping:'قيد التنفيذ', canceled:'ملغي', refunded:'مسترجع', unpaid:'بانتظار الدفع'};
   const sRows = D.statusNames ? D.statusNames : Object.entries(D.status).sort((x,y) => y[1]-x[1]).map(([k,n]) => [ST[k] || k, n]);   // أسماء الحالات كما في سلة
   $('#careStatus').innerHTML = sRows.map(([k,n]) => `<tr><td>${esc(k)}</td><td>${fmt(n)}</td></tr>`).join('') + (sRows.length ? `<tr><td><b>الإجمالي</b></td><td><b>${fmt(D.orders)}</b></td></tr>` : '') || '<tr><td colspan="2" class="empty">لا توجد طلبات</td></tr>';
-  $('#careNote').textContent = 'الطلبات الصالحة = غير الملغية وغير المسترجعة وغير بانتظار الدفع، وهو نفس تعريف اللوحة. النسب مقارنةً بكل طلبات المتجر في الفترة نفسها.';
+  const nt = D.tags ? D.tags.length : 1;
+  $('#careNote').textContent = 'الطلبات الصالحة = غير الملغية وغير المسترجعة وغير بانتظار الدفع، وهو نفس تعريف اللوحة. النسب مقارنةً بكل طلبات المتجر في الفترة نفسها.'
+    + (nt >= 2 ? ` تُحسب الوسوم: Customer Care Team و customer Care Team (${nt} وسوم، والطلب الذي عليه الوسمان يُحسب مرة).` : ' تنبيه: وُجد وسم واحد فقط؛ لم يُعثر تلقائياً على الوسم الثاني customer Care Team.');
 }
 
 document.addEventListener('click', async e => {

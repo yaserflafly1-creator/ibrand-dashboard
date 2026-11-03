@@ -39,8 +39,8 @@ CAMPAIGN_DAYS = "90"
 SYNC_BUDGET = "40"
 INVENTORY_SYNC = "off"
 SALLA_APP_ID = "1866862647"
-# معرّف وسم «Customer Care Team» في سلة (لتقرير طلبات خدمة العملاء)
-CARE_TAG_ID = "52805995"
+# معرّفات وسوم خدمة العملاء (احتياطي؛ يُكتشف الوسمان «Customer Care Team» و«customer Care Team» تلقائياً من قائمة وسوم سلة)
+CARE_TAG_IDS = "52805995"
 
 # الأسرار (لا تُكتب هنا): npx wrangler secret put SALLA_CLIENT_ID
 #   SALLA_CLIENT_ID, SALLA_CLIENT_SECRET, SALLA_WEBHOOK_SECRET
