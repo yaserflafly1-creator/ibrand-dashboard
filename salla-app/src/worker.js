@@ -404,8 +404,9 @@ async function handleCare(req, env) {
   if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > 800) return json({ error: 'range too long' }, 400);
   const tag = String(env.CARE_TAG_ID || CARE_DEFAULT_TAG);
   const ttl = to < riyadhDay(Date.now()) ? 600e3 : 90e3;
+  const wantList = q.get('list') === '1' && !ctx.shared;   // قائمة الطلبات (رقم/تاريخ/حالة/قيمة) بلا بيانات عملاء؛ لتوكن سلة فقط
   try {
-    const text = await memo(`care:${ctx.merchant}:${tag}:${from}:${to}`, ttl, async () => {
+    const text = await memo(`care:${ctx.merchant}:${tag}:${from}:${to}:${wantList ? 'l' : ''}`, ttl, async () => {
       const get = ctx.get || makeClient(env, ctx.merchant, await (async () => { const t = await loadTokens(env, ctx.merchant); if (!t) throw new Error('salla 403 app not installed'); return t; })());
       const page = (n, tagged) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...(tagged ? { 'tags[0]': tag } : {}) });
       const [first, plain] = await Promise.all([page(1, true), page(1, false)]);
@@ -414,7 +415,7 @@ async function handleCare(req, env) {
       const pages = first.pagination?.totalPages || 1;
       if (pages > CARE_MAX_PAGES) throw Object.assign(new Error('too many orders'), { careErr: 'too_many' });
       const batches = [first, ...(pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, true)) : [])];
-      const days = {}, status = {}, pay = {};
+      const days = {}, status = {}, pay = {}, names = {}, list = [];
       let valid = 0, revenue = 0, canceled = 0, canceledValue = 0, unpaid = 0, all = 0;
       for (const o of batches.flatMap((j) => j.data || [])) {
         const day = String(o.date?.date || '').slice(0, 10);
@@ -422,6 +423,8 @@ async function handleCare(req, env) {
         all++;
         const st = mapStatus(o.status?.slug), total = Number(o.total?.amount) || 0;
         status[st] = (status[st] || 0) + 1;
+        const nm = String(o.status?.customized?.name || o.status?.name || '—'); names[nm] = (names[nm] || 0) + 1;   // أسماء الحالات كما في سلة
+        if (wantList) list.push([String(o.date.date).slice(0, 16), o.reference_id ?? o.id, nm, total, o.payment_method || '']);
         if (st === 'canceled') { canceled++; canceledValue += total; continue; }
         if (st === 'unpaid' || st === 'refunded') { if (st === 'unpaid') unpaid++; continue; }
         valid++; revenue += total;
@@ -431,7 +434,8 @@ async function handleCare(req, env) {
       await ensureSchema(env.DB);
       const totals = await rangeTotals(env.DB, ctx.merchant, from, to);
       const r2 = (n) => Math.round(n * 100) / 100;
-      return JSON.stringify({ tag, orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
+      list.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+      return JSON.stringify({ tag, ...(wantList ? { rows: list } : {}), statusNames: Object.entries(names).sort((a, b) => b[1] - a[1]), orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
         series: Object.entries(days).sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, [n, v]]) => [d, n, r2(v)]),
         pay: Object.entries(pay).map(([k, [n, v]]) => ({ k, orders: n, total: r2(v) })).sort((a, b) => b.total - a.total),
         all: totals, shareOrders: totals.orders ? r2(valid / totals.orders * 100) : 0, shareRevenue: totals.revenue ? r2(revenue / totals.revenue * 100) : 0 });

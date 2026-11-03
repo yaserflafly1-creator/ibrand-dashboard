@@ -263,7 +263,7 @@ test('search-gaps: key stays server-side; friendly errors; Salla token or share 
 
 test('care-orders: tagged orders only (tag filter param), valid vs canceled, share of all orders; refuses when tag filter is ignored', async () => {
   const env = mkEnv();
-  const ord = (id, d, status, total, pm = 'cod') => ({ id, reference_id: 900 + id, total: { amount: total }, date: { date: d + ':00.000000' }, status: { slug: status }, draft: false, payment_method: pm, items: [] });
+  const ord = (id, d, status, total, pm = 'cod') => ({ id, reference_id: 900 + id, total: { amount: total }, date: { date: d + ':00.000000' }, status: { slug: status, name: status }, draft: false, payment_method: pm, items: [] });
   const seen = [];
   const ignoreFilter = { on: false };
   mockFetch(good, { '/orders': (u) => {
@@ -276,6 +276,9 @@ test('care-orders: tagged orders only (tag filter param), valid vs canceled, sha
   assert.ok(seen.includes('52805995'));                                   // وسم خدمة العملاء مرسل لسلة
   assert.equal(j.valid, 2); assert.equal(j.revenue, 160); assert.equal(j.canceled, 1); assert.equal(j.unpaid, 1); assert.equal(j.aov, 80);
   assert.deepEqual(j.series, [['2026-10-10', 1, 100], ['2026-10-11', 1, 60]]);   // 2026-10-12 خارج الفترة
+  assert.equal(j.orders, 4); assert.deepEqual(j.statusNames.map((x) => x[1]), [1, 1, 1, 1]); assert.equal(j.rows, undefined);
+  const jl = await (await get(env, '/api/care-orders?from=2026-10-10&to=2026-10-11&list=1')).json();
+  assert.equal(jl.rows.length, 4); assert.deepEqual(jl.rows[0].slice(1, 4), [901, 'completed', 100]);
   assert.equal(j.all.orders, 3); assert.equal(j.shareOrders, Math.round(2 / 3 * 10000) / 100);
   assert.equal(j.pay.find((x) => x.k === 'mada').orders, 1);
   assert.equal((await worker.fetch(new Request('https://x.test/api/care-orders?from=2026-10-10&to=2026-10-11'), env)).status, 401);
