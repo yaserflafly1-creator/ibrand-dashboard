@@ -415,28 +415,31 @@ async function handleCare(req, env) {
     const text = await memo(`care:${ctx.merchant}:${from}:${to}:${wantList ? 'l' : ''}`, ttl, async () => {
       const get = ctx.get || makeClient(env, ctx.merchant, await (async () => { const t = await loadTokens(env, ctx.merchant); if (!t) throw new Error('salla 403 app not installed'); return t; })());
       const tagIds = await careTagIds(env, ctx.merchant, get);
-      const page = (n, tag) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...(tag ? { 'tags[0]': tag } : {}) });
-      const plain = await page(1, null), plainTotal = plain.pagination?.total ?? 0;
-      const byId = new Map();   // طلب عليه الوسمان يُحسب مرة واحدة
-      for (const tag of tagIds) {
-        const first = await page(1, tag), tot = first.pagination?.total ?? 0;
-        if (plainTotal > 30 && tot >= plainTotal) throw Object.assign(new Error('tag filter ignored'), { careErr: 'tag_filter_ignored' });   // لا نعرض كل الطلبات على أنها طلبات الفريق
+      const page = (n, extra) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...extra });
+      const plain = await page(1, {}), plainTotal = plain.pagination?.total ?? 0;
+      /* طلبات الفريق = (أ) عليها وسم خدمة العملاء، أو (ب) أُنشئت من لوحة التحكم: الفريق وحده مخوّل بإنشاء الطلبات في سلة فبعضهم لا يضع الوسم */
+      const sources = String(env.CARE_SOURCES ?? 'dashboard').split(',').map((x) => x.trim()).filter(Boolean);
+      const queries = [...tagIds.map((t) => ({ kind: 'tag', extra: { 'tags[0]': t } })), ...sources.map((x) => ({ kind: 'src', extra: { 'source[0]': x } }))];
+      const byId = new Map(), tagged = new Set();   // الطلب الذي يطابق أكثر من شرط يُحسب مرة واحدة
+      for (const { kind, extra } of queries) {
+        const first = await page(1, extra), tot = first.pagination?.total ?? 0;
+        if (plainTotal > 30 && tot >= plainTotal) throw Object.assign(new Error('filter ignored'), { careErr: 'tag_filter_ignored' });   // لا نعرض كل الطلبات على أنها طلبات الفريق
         const pages = first.pagination?.totalPages || 1;
         if (pages > CARE_MAX_PAGES) throw Object.assign(new Error('too many orders'), { careErr: 'too_many' });
-        const rest = pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, tag)) : [];
-        for (const o of [first, ...rest].flatMap((j) => j.data || [])) byId.set(o.id, o);
+        const rest = pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, extra)) : [];
+        for (const o of [first, ...rest].flatMap((j) => j.data || [])) { byId.set(o.id, o); if (kind === 'tag') tagged.add(o.id); }
       }
       const batches = [{ data: [...byId.values()] }];
       const days = {}, status = {}, pay = {}, names = {}, list = [];
-      let valid = 0, revenue = 0, canceled = 0, canceledValue = 0, unpaid = 0, all = 0;
+      let valid = 0, revenue = 0, canceled = 0, canceledValue = 0, unpaid = 0, all = 0, taggedN = 0;
       for (const o of batches.flatMap((j) => j.data || [])) {
         const day = String(o.date?.date || '').slice(0, 10);
         if (o.draft || day < from || day > to) continue;
-        all++;
+        all++; if (tagged.has(o.id)) taggedN++;
         const st = mapStatus(o.status?.slug), total = Number(o.total?.amount) || 0;
         status[st] = (status[st] || 0) + 1;
         const nm = String(o.status?.customized?.name || o.status?.name || '—'); names[nm] = (names[nm] || 0) + 1;   // أسماء الحالات كما في سلة
-        if (wantList) list.push([String(o.date.date).slice(0, 16), o.reference_id ?? o.id, nm, total, o.payment_method || '']);
+        if (wantList) list.push([String(o.date.date).slice(0, 16), o.reference_id ?? o.id, nm, total, o.payment_method || '', tagged.has(o.id) ? 'نعم' : 'لا']);
         if (st === 'canceled') { canceled++; canceledValue += total; continue; }
         if (st === 'unpaid' || st === 'refunded') { if (st === 'unpaid') unpaid++; continue; }
         valid++; revenue += total;
@@ -447,7 +450,7 @@ async function handleCare(req, env) {
       const totals = await rangeTotals(env.DB, ctx.merchant, from, to);
       const r2 = (n) => Math.round(n * 100) / 100;
       list.sort((a, b) => (a[0] < b[0] ? -1 : 1));
-      return JSON.stringify({ tags: tagIds, ...(wantList ? { rows: list } : {}), statusNames: Object.entries(names).sort((a, b) => b[1] - a[1]), orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
+      return JSON.stringify({ tags: tagIds, sources, taggedOrders: taggedN, untaggedOrders: all - taggedN, ...(wantList ? { rows: list } : {}), statusNames: Object.entries(names).sort((a, b) => b[1] - a[1]), orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
         series: Object.entries(days).sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, [n, v]]) => [d, n, r2(v)]),
         pay: Object.entries(pay).map(([k, [n, v]]) => ({ k, orders: n, total: r2(v) })).sort((a, b) => b.total - a.total),
         all: totals, shareOrders: totals.orders ? r2(valid / totals.orders * 100) : 0, shareRevenue: totals.revenue ? r2(revenue / totals.revenue * 100) : 0 });

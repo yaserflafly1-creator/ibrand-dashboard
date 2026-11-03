@@ -563,7 +563,7 @@ body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
   </section>
 
   <section data-tab="care" class="card panel sec" id="carePanel">
-    <div class="panel-h"><div><h2>طلبات خدمة العملاء</h2><p id="careSub">الطلبات المنشأة من فريق خدمة العملاء (وسم Customer Care Team) · حسب فلتر التاريخ</p></div><button class="btn" id="careExport" type="button">تنزيل القائمة (CSV)</button></div>
+    <div class="panel-h"><div><h2>طلبات خدمة العملاء</h2><p id="careSub">طلبات فريق خدمة العملاء: كل طلب عليه الوسم أو أُنشئ من لوحة التحكم (هم المخوّلون بإنشاء الطلبات) · حسب فلتر التاريخ</p></div><button class="btn" id="careExport" type="button">تنزيل القائمة (CSV)</button></div>
     <div class="mini-kpis" id="careKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div class="chart-box" style="height:240px"><canvas id="careChart" dir="ltr"></canvas></div>
     <div class="grid-charts" style="grid-template-columns:1fr 1fr;margin:14px 0 0">
@@ -1012,8 +1012,8 @@ function renderCare(){
   const rate = D.orders ? D.canceled/D.orders*100 : 0;
   const other = D.orders - D.valid - D.canceled;
   $('#careKpis').innerHTML = [
-    [fmt(D.orders), 'كل طلبات خدمة العملاء (بكل الحالات)', `صالحة ${fmt(D.valid)} · ملغية ${fmt(D.canceled)}${other>0 ? ' · أخرى '+fmt(other) : ''}`],
-    [fmt(D.valid), 'الطلبات الصالحة', `${D.shareOrders.toFixed(1)}% من كل طلبات المتجر (${fmt(D.all.orders)})`],
+    [fmt(D.orders), 'كل طلبات خدمة العملاء (بكل الحالات)', `موسومة ${fmt(D.taggedOrders ?? D.orders)}${D.untaggedOrders ? ' · بلا وسم (من لوحة التحكم) '+fmt(D.untaggedOrders) : ''}`],
+    [fmt(D.valid), 'الطلبات الصالحة', `ملغية ${fmt(D.canceled)}${other>0 ? ' · أخرى '+fmt(other) : ''} · ${D.shareOrders.toFixed(1)}% من كل طلبات المتجر (${fmt(D.all.orders)})`],
     [money(D.revenue)+' '+CURRENCY, 'مبيعاتها', `${D.shareRevenue.toFixed(1)}% من إجمالي المبيعات · الملغية ${rate.toFixed(1)}%`],
     [money(D.aov)+' '+CURRENCY, 'متوسط قيمة الطلب', `متوسط المتجر: ${money(avgAll)} ${CURRENCY}`]
   ].map(([v,l,sub]) => `<div class="mini"><b>${v}</b><span>${l}</span><span style="display:block;margin-top:4px">${sub}</span></div>`).join('');
@@ -1032,7 +1032,7 @@ function renderCare(){
   $('#careStatus').innerHTML = sRows.map(([k,n]) => `<tr><td>${esc(k)}</td><td>${fmt(n)}</td></tr>`).join('') + (sRows.length ? `<tr><td><b>الإجمالي</b></td><td><b>${fmt(D.orders)}</b></td></tr>` : '') || '<tr><td colspan="2" class="empty">لا توجد طلبات</td></tr>';
   const nt = D.tags ? D.tags.length : 1;
   $('#careNote').textContent = 'الطلبات الصالحة = غير الملغية وغير المسترجعة وغير بانتظار الدفع، وهو نفس تعريف اللوحة. النسب مقارنةً بكل طلبات المتجر في الفترة نفسها.'
-    + (nt >= 2 ? ` تُحسب الوسوم: Customer Care Team و customer Care Team (${nt} وسوم، والطلب الذي عليه الوسمان يُحسب مرة).` : ' تنبيه: وُجد وسم واحد فقط؛ لم يُعثر تلقائياً على الوسم الثاني customer Care Team.');
+    + (nt >= 2 ? ` تُحسب الوسوم: Customer Care Team و customer Care Team (${nt} وسوم). تُضاف إليها طلبات لوحة التحكم غير الموسومة، والطلب الذي يطابق أكثر من شرط يُحسب مرة واحدة.` : ' تنبيه: وُجد وسم واحد فقط؛ لم يُعثر تلقائياً على الوسم الثاني customer Care Team. طلبات لوحة التحكم غير الموسومة محسوبة أيضاً.');
 }
 
 document.addEventListener('click', async e => {
@@ -1043,7 +1043,7 @@ document.addEventListener('click', async e => {
     const rows = d && d.rows ? d.rows : [];
     if(!rows.length){ toast(LIVE ? 'لا توجد طلبات في هذه الفترة' : 'القائمة متاحة داخل سلة فقط'); return; }
     const cell = v => { let t = String(v ?? ''); if(/^[=+@-]/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
-    const csv = '\uFEFF' + [['التاريخ','رقم الطلب','الحالة','قيمة الطلب','طريقة الدفع'], ...rows].map(r => r.map(cell).join(',')).join('\n') + '\n';
+    const csv = '\uFEFF' + [['التاريخ','رقم الطلب','الحالة','قيمة الطلب','طريقة الدفع','عليه الوسم؟'], ...rows].map(r => r.map(cell).join(',')).join('\n') + '\n';
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'})); a.download = `care-orders-${ymd(from)}_${ymd(to)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
   }catch(err){ toast('تعذّر تجهيز القائمة'); }
