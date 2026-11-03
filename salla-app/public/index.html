@@ -1565,7 +1565,7 @@ async function loadShipments(){
 function stamp(){
   $('#lastUpdated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA-u-nu-latn', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) + (LIVE ? '' : ' (بيانات تجريبية)');
 }
-async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments()]); }
+async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments(), loadCx()]); }
 let autoTimer = null;
 function scheduleAuto(){
   clearInterval(autoTimer);
@@ -1887,11 +1887,19 @@ document.addEventListener('click', e => {
   cxOpen[b.dataset.cx] = !cxOpen[b.dataset.cx];
   loadCx();
 });
+let cxLastOk = 0;
+function cxStamp(ok){
+  const el = $('#cxSub'); if(!el) return;
+  if(ok) cxLastOk = Date.now();
+  if(!cxLastOk) return;
+  const t = new Date(cxLastOk).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  el.textContent = `أداء اقتراحات المنتجات المكمّلة · آخر تحديث ${t}` + (ok ? '' : ' (تعذّر التحديث الآن، يُعرض آخر ما وصل)');
+}
 async function loadCx(){
   try{
     if(typeof Chart==='undefined') return;
     const N = cxDays;
-    const res = await fetch(`${CX_URL}&days=${N*2}&top=${N}`);
+    const res = await fetch(`${CX_URL}&days=${N*2}&top=${N}`, {cache:'no-store'});
     if(!res.ok) throw new Error(res.status);
     const d = await res.json();
     // الفترة الحالية = آخر N يوم، والسابقة = N يوم قبلها (بتوقيت الرياض)
@@ -1942,7 +1950,8 @@ async function loadCx(){
     cxList('#cxTop', ta, Math.max(1, ...ta.map(x => x.adds)));
     cxList('#cxSrc', ts, Math.max(1, ...ts.map(x => x.adds)));
     $('#cxPanel').hidden = false;
-  }catch(e){ console.warn('complement stats', e); /* the section stays hidden if the suggestions app is unreachable */ }
+    cxStamp(true);
+  }catch(e){ console.warn('complement stats', e); /* القسم يبقى مخفياً إن لم تُحمَّل بياناته أصلاً؛ وإن كانت معروضة نُظهر أن آخر تحديث قديم */ cxStamp(false); }
 }
 $('#cxDays').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
