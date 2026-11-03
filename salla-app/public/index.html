@@ -593,9 +593,7 @@ body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
   <div data-tab="cx" id="cxPanel" hidden aria-label="كمل احتياجك">
     <div class="panel-h" style="margin:6px 4px 12px">
       <div><h2 style="font-size:1.15rem">كمل احتياجك</h2><p id="cxSub">أداء اقتراحات المنتجات المكمّلة</p></div>
-      <div class="seg" id="cxDays" role="group" aria-label="الفترة">
-        <button type="button" data-d="7">7 أيام</button><button type="button" data-d="30" class="on">30 يوم</button><button type="button" data-d="90">90 يوم</button>
-      </div>
+      <span class="period-note" id="cxRange" style="margin:0"></span>
     </div>
     <section class="cx-kpis" id="cxKpis"></section>
     <section class="grid-charts">
@@ -1110,7 +1108,7 @@ function setTab(t, keep){
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { setTab(b.dataset.t); window.scrollTo({top:0}); }));
 // تبويب بلا أي قسم ظاهر (مثل المخزون/الشحن/الكوبونات عند تعطيلها) يُخفى، ويرجع العرض لـ«نظرة عامة» إن كان مفتوحاً
-const tabHasContent = t => [...document.querySelectorAll(`[data-tab="${t}"]`)].some(e => e!==document.body && !e.hidden && e.style.display!=='none');
+const tabHasContent = t => (t==='cx' && !window.cxTried) || [...document.querySelectorAll(`[data-tab="${t}"]`)].some(e => e!==document.body && !e.hidden && e.style.display!=='none');
 let tabsRaf = 0;
 function refreshTabs(){
   tabsRaf = 0;
@@ -1415,6 +1413,7 @@ async function update(){
   renderCategories(cur);
   loadBasket(from, to);
   loadMonths();
+  setTimeout(() => loadCx(from, to), 0);   // بعد اكتمال تحميل السكربت (قسم «كمل احتياجك» يُعرَّف في آخره)
   if(document.body.dataset.tab==='care') loadCare(from, to);
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
@@ -1565,7 +1564,7 @@ async function loadShipments(){
 function stamp(){
   $('#lastUpdated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA-u-nu-latn', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) + (LIVE ? '' : ' (بيانات تجريبية)');
 }
-async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments(), loadCx()]); }
+async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments()]); }
 let autoTimer = null;
 function scheduleAuto(){
   clearInterval(autoTimer);
@@ -1863,7 +1862,7 @@ const CX_ICON = {
   click:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9l10 4-4.5 1.5L13 19z"/><path d="M5 3v3M3 5h3M7.5 7.5L9 9"/></svg>',
   star:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>'
 };
-let cxChart = null, cxDonut = null, cxDays = 30;
+let cxChart = null, cxDonut = null, cxRange = null;   // الفترة تتبع فلتر التاريخ في أعلى اللوحة
 function cxSum(rows){
   const t = {product:{impressions:0,clicks:0,adds:0}, cart:{impressions:0,clicks:0,adds:0}, popup:{impressions:0,clicks:0,adds:0}};
   for(const r of rows) for(const [k] of CX_SECTIONS) for(const m of ['impressions','clicks','adds']) t[k][m] += (r[k] && r[k][m]) || 0;
@@ -1895,18 +1894,18 @@ function cxStamp(ok){
   const t = new Date(cxLastOk).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
   el.textContent = `أداء اقتراحات المنتجات المكمّلة · آخر تحديث ${t}` + (ok ? '' : ' (تعذّر التحديث الآن، يُعرض آخر ما وصل)');
 }
-async function loadCx(){
+async function loadCx(from, to){
   try{
     if(typeof Chart==='undefined') return;
-    const N = cxDays;
-    const res = await fetch(`${CX_URL}&days=${N*2}&top=${N}`, {cache:'no-store'});
+    if(from && to) cxRange = [startOfDay(from), startOfDay(to)];
+    if(!cxRange){ const t = startOfDay(new Date()); cxRange = [new Date(t.getFullYear(), t.getMonth(), 1), t]; }
+    const [f, t] = cxRange, days = Math.round((t - f)/864e5) + 1;
+    $('#cxRange').textContent = `${fmtDate(f)}${days>1 ? ' – '+fmtDate(t) : ''}`;
+    if(days > 366){ const el = $('#cxSub'); if(el) el.textContent = 'الفترة أطول من 366 يوماً: اختر فترة أقصر لعرض «كمل احتياجك»'; return; }
+    const res = await fetch(`${CX_URL}&from=${ymd(f)}&to=${ymd(t)}`, {cache:'no-store'});
     if(!res.ok) throw new Error(res.status);
     const d = await res.json();
-    // الفترة الحالية = آخر N يوم، والسابقة = N يوم قبلها (بتوقيت الرياض)
-    const day = k => new Date(Date.now() + 3*3600e3 - k*864e5).toISOString().slice(0,10);
-    const c1 = day(N), c0 = day(2*N);
-    const rows = d.daily || [];
-    const curRows = rows.filter(r => r.day > c1), prevRows = rows.filter(r => r.day > c0 && r.day <= c1);
+    const curRows = d.daily || [], prevRows = d.prev_daily || [];   // الفترة السابقة (بنفس الطول) تأتي جاهزة من الخدمة
     const cur = cxSum(curRows), prev = cxSum(prevRows), A = cxAll(cur), P = cxAll(prev);
     const rateC = cxPct(A.adds, A.impressions), rateP = cxPct(P.adds, P.impressions);
     const best = CX_SECTIONS.map(([k,name]) => [name, cur[k].adds]).sort((a,b) => b[1]-a[1])[0];
@@ -1935,7 +1934,7 @@ async function loadCx(){
     }).join('');
     // الرسم اليومي (كل يوم من الفترة الحالية حتى الأيام الفارغة)
     const byDay = new Map(curRows.map(r => [r.day, r]));
-    const labels = []; for(let k = N-1; k >= 0; k--) labels.push(day(k));
+    const labels = []; for(let x = new Date(f); x <= t; x = new Date(x.getFullYear(), x.getMonth(), x.getDate()+1)) labels.push(ymd(x));
     const data = {labels: labels.map(l => l.slice(5)), datasets: CX_SECTIONS.map(([k,name,color]) => ({label:name, data:labels.map(l => (byDay.get(l) || {})[k] ? byDay.get(l)[k].adds : 0), backgroundColor:color, borderRadius:4}))};
     const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}, scales:{x:{stacked:true,grid:{display:false},ticks:{maxTicksLimit:12}}, y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}};
     if(cxChart){ cxChart.data = data; cxChart.update(); } else cxChart = new Chart($('#cxChart'), {type:'bar', data, options:opts});
@@ -1944,22 +1943,15 @@ async function loadCx(){
     const dopts = {cutout:'68%', plugins:{legend:{display:false}}, maintainAspectRatio:false};
     if(cxDonut){ cxDonut.data = dd; cxDonut.update(); } else cxDonut = new Chart($('#cxDonut'), {type:'doughnut', data:dd, options:dopts});
     $('#cxDonutTotal').textContent = fmt(A.adds);
-    $('#cxDonutSub').textContent = `آخر ${N} يوم`;
+    $('#cxDonutSub').textContent = `${fmtDate(f)}${days>1 ? ' – '+fmtDate(t) : ''}`;
     $('#cxLegend').innerHTML = CX_SECTIONS.map(([k,name,color]) => `<div><i style="background:${color};width:10px;height:10px;border-radius:50%;display:inline-block"></i>${esc(name)}<span class="n">${fmt(cur[k].adds)}</span><span class="p">${cxPct(cur[k].adds, A.adds).toFixed(0)}%</span></div>`).join('');
     const ta = d.top_added || [], ts = d.top_sources || [];
     cxList('#cxTop', ta, Math.max(1, ...ta.map(x => x.adds)));
     cxList('#cxSrc', ts, Math.max(1, ...ts.map(x => x.adds)));
     $('#cxPanel').hidden = false;
-    cxStamp(true);
-  }catch(e){ console.warn('complement stats', e); /* القسم يبقى مخفياً إن لم تُحمَّل بياناته أصلاً؛ وإن كانت معروضة نُظهر أن آخر تحديث قديم */ cxStamp(false); }
+    cxStamp(true); window.cxTried = true;
+  }catch(e){ window.cxTried = true; console.warn('complement stats', e); /* القسم يبقى مخفياً إن لم تُحمَّل بياناته أصلاً؛ وإن كانت معروضة نُظهر أن آخر تحديث قديم */ cxStamp(false); }
 }
-$('#cxDays').addEventListener('click', e => {
-  const b = e.target.closest('button'); if(!b) return;
-  cxDays = Number(b.dataset.d);
-  document.querySelectorAll('#cxDays button').forEach(x => x.classList.toggle('on', x===b));
-  loadCx();
-});
-if(typeof Chart!=='undefined'){ loadCx(); setInterval(loadCx, 10*60*1000); }
 
 async function boot(){
   if(LIVE && SDK && !SHARE){
