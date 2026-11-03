@@ -244,7 +244,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .buy-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px}
-@media (max-width:640px){#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
+@media (max-width:640px){#careKpis{grid-template-columns:1fr 1fr!important}#carePanel table{min-width:0!important;width:100%}#carePanel th,#carePanel td{padding:10px 6px;font-size:.8rem}#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
 /* تبويبات اللوحة: كل قسم يحمل data-tab؛ الأقسام الجديدة تُضاف بإعطائها data-tab فقط */
 .tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 12px;position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg,#fdf2f8) 78%,transparent);scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -257,6 +257,7 @@ body[data-tab="cancel"] [data-tab]:not([data-tab="cancel"]){display:none!importa
 body[data-tab="ops"] [data-tab]:not([data-tab="ops"]){display:none!important}
 body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
 body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
+body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
 /* كمل احتياجك */
 .cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
@@ -336,6 +337,7 @@ body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
     <button type="button" role="tab" data-t="sales">العملاء والمبيعات</button>
     <button type="button" role="tab" data-t="cancel">الملغي</button>
     <button type="button" role="tab" data-t="ops">المخزون والشحن</button>
+    <button type="button" role="tab" data-t="care">خدمة العملاء</button>
     <button type="button" role="tab" data-t="buy">المشتريات</button>
     <button type="button" role="tab" data-t="cx">كمل احتياجك</button>
   </nav>
@@ -558,6 +560,17 @@ body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
         <tbody id="cpnRows"></tbody>
       </table>
     </div>
+  </section>
+
+  <section data-tab="care" class="card panel sec" id="carePanel">
+    <div class="panel-h"><div><h2>طلبات خدمة العملاء</h2><p id="careSub">الطلبات المنشأة من فريق خدمة العملاء (وسم Customer Care Team) · حسب فلتر التاريخ</p></div></div>
+    <div class="mini-kpis" id="careKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="chart-box" style="height:240px"><canvas id="careChart" dir="ltr"></canvas></div>
+    <div class="grid-charts" style="grid-template-columns:1fr 1fr;margin:14px 0 0">
+      <div class="tbl-wrap"><table><thead><tr><th>طريقة الدفع</th><th>الطلبات</th><th>المبيعات</th></tr></thead><tbody id="carePay"></tbody></table></div>
+      <div class="tbl-wrap"><table><thead><tr><th>حالة الطلب</th><th>العدد</th></tr></thead><tbody id="careStatus"></tbody></table></div>
+    </div>
+    <p class="period-note" id="careNote" style="margin:10px 0 0"></p>
   </section>
 
   <section data-tab="buy" class="card panel sec" id="buyPanel">
@@ -962,6 +975,62 @@ $('#prodSearch').addEventListener('input', renderProducts);
 $('#prodMore').addEventListener('click', () => { prodAll = !prodAll; renderProducts(); });
 document.querySelectorAll('table.sortable th[data-s]').forEach(th => th.addEventListener('click', () => { prodSort = th.dataset.s; renderProducts(); }));
 document.querySelectorAll('#timeMode button').forEach(b => b.addEventListener('click', () => { timeMode = b.dataset.m; if(state.view) renderTime(state.view.cur); }));
+/* ============ طلبات خدمة العملاء (وسم Customer Care Team) ============ */
+let careData = null, careErr = '', careSeq = 0, careKey = '', careAt = 0, careChart = null, careRange = null;
+const CARE_MSG = {tag_filter_ignored:'تعذّر تطبيق فلتر الوسم في سلة، فلن نعرض أرقاماً غير دقيقة.', too_many:'الفترة كبيرة، اختر فترة أقصر.', forbidden:'صلاحية قراءة الطلبات غير مفعّلة للتطبيق.', unreachable:'تعذّر جلب البيانات من سلة الآن، حاول بعد قليل.'};
+function demoCare(from, to){
+  const a = from.getTime(), b = endOfDay(to).getTime(), pick = ORDERS.filter((o,i) => o.ts>=a && o.ts<=b && i%6===0), all = ORDERS.filter(o => o.ts>=a && o.ts<=b && VALID(o));
+  const days = {}, pay = {}, status = {}; let valid = 0, revenue = 0, canceled = 0, canceledValue = 0;
+  pick.forEach(o => { status[o.status] = (status[o.status]||0)+1;
+    if(o.status==='canceled'){ canceled++; canceledValue += o.total; return; }
+    if(!VALID(o)) return; valid++; revenue += o.total; const d = ymd(new Date(o.ts)); (days[d] || (days[d] = [0,0]))[0]++; days[d][1] += o.total;
+    const p = pay[o.pay] || (pay[o.pay] = [0,0]); p[0]++; p[1] += o.total; });
+  const tOrd = all.length, tRev = all.reduce((x,o) => x+o.total, 0);
+  return {orders:pick.length, valid, revenue, aov:valid ? revenue/valid : 0, canceled, canceledValue, unpaid:0, status,
+    series:Object.entries(days).sort(([x],[y]) => x<y?-1:1).map(([d,[n,v]]) => [d,n,v]), pay:Object.entries(pay).map(([k,[n,v]]) => ({k, orders:n, total:v})).sort((x,y) => y.total-x.total),
+    all:{orders:tOrd, revenue:tRev}, shareOrders:tOrd ? valid/tOrd*100 : 0, shareRevenue:tRev ? revenue/tRev*100 : 0};
+}
+async function loadCare(from, to, force){
+  const key = ymd(from)+'_'+ymd(to); careRange = [from, to];
+  if(!force && careData && key===careKey && Date.now()-careAt < 60e3) return;
+  const seq = ++careSeq;
+  try{
+    const d = LIVE ? await api(`/api/care-orders?from=${ymd(from)}&to=${ymd(to)}`) : demoCare(from, to);
+    if(seq !== careSeq) return;
+    if(d.error){ careErr = d.error; careData = null; } else { careErr = ''; careData = d; careKey = key; careAt = Date.now(); }
+  }catch(e){ if(seq !== careSeq) return; careErr = e.status===403 ? 'forbidden' : e.status===401 ? 'unauthorized' : 'unreachable'; careData = null; }
+  renderCare();
+}
+function renderCare(){
+  if(!$('#carePanel')) return;
+  if(!careData){
+    $('#careKpis').innerHTML = ''; $('#carePay').innerHTML = ''; $('#careStatus').innerHTML = '';
+    $('#careNote').textContent = CARE_MSG[careErr] || (careErr==='unauthorized' ? 'انتهت صلاحية الرابط.' : 'جارٍ التحميل…');
+    if(careChart){ careChart.destroy(); careChart = null; } return;
+  }
+  const D = careData, [from, to] = careRange, avgAll = D.all.orders ? D.all.revenue/D.all.orders : 0;
+  const rate = D.orders ? D.canceled/D.orders*100 : 0;
+  $('#careKpis').innerHTML = [
+    [fmt(D.valid), 'طلبات خدمة العملاء', `${D.shareOrders.toFixed(1)}% من كل الطلبات (${fmt(D.all.orders)})`],
+    [money(D.revenue)+' '+CURRENCY, 'مبيعاتها', `${D.shareRevenue.toFixed(1)}% من إجمالي المبيعات`],
+    [money(D.aov)+' '+CURRENCY, 'متوسط قيمة الطلب', `متوسط المتجر: ${money(avgAll)} ${CURRENCY}`],
+    [fmt(D.canceled), 'ملغية من طلباتهم', `${rate.toFixed(1)}% · قيمتها ${money(D.canceledValue)} ${CURRENCY}`]
+  ].map(([v,l,sub]) => `<div class="mini"><b>${v}</b><span>${l}</span><span style="display:block;margin-top:4px">${sub}</span></div>`).join('');
+  const days = Math.round((to - startOfDay(from))/864e5)+1, gran = autoGran(days), sr = buildSeries(from, to, gran);
+  D.series.forEach(([day, n, rev]) => { const i = sr.idx[sr.keyOf(day)]; if(i!==undefined){ sr.cnt[i] += n; sr.rev[i] += rev; } });
+  const data = {labels:sr.labels, datasets:[{label:'الطلبات', data:sr.cnt, backgroundColor:'#ec4899', borderRadius:6, maxBarThickness:36}]};
+  const opts = {responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:false}, tooltip:{rtl:true, textDirection:'rtl', backgroundColor:'#2a1a24', padding:12, cornerRadius:12, titleFont:{family:'IBM Plex Sans Arabic'}, bodyFont:{family:'IBM Plex Sans Arabic'},
+      callbacks:{label:c => `الطلبات: ${fmt(c.parsed.y)}`, afterLabel:c => `المبيعات: ${money(sr.rev[c.dataIndex])} ${CURRENCY}`}}},
+    scales:{x:{grid:{display:false}, border:{display:false}, ticks:{maxTicksLimit:8, maxRotation:0, color:'#8b7480', font:{family:'IBM Plex Sans Arabic', size:11}}},
+      y:{beginAtZero:true, border:{display:false}, grid:{color:'#f6e9ef'}, ticks:{precision:0, maxTicksLimit:5, color:'#8b7480', font:{family:'IBM Plex Sans Arabic', size:11}}}}};
+  if(careChart){ careChart.data = data; careChart.options = opts; careChart.update(); } else careChart = new Chart($('#careChart'), {type:'bar', data, options:opts});
+  $('#carePay').innerHTML = D.pay.length ? D.pay.map(x => `<tr><td>${esc(PAY_AR[x.k] || x.k)}</td><td>${fmt(x.orders)}</td><td>${money(x.total)} ${CURRENCY}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">لا توجد طلبات</td></tr>';
+  const ST = {completed:'مكتمل', shipping:'قيد التنفيذ', canceled:'ملغي', refunded:'مسترجع', unpaid:'بانتظار الدفع'};
+  $('#careStatus').innerHTML = Object.entries(D.status).sort((x,y) => y[1]-x[1]).map(([k,n]) => `<tr><td>${ST[k] || k}</td><td>${fmt(n)}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">لا توجد طلبات</td></tr>';
+  $('#careNote').textContent = 'الطلبات الصالحة = غير الملغية وغير المسترجعة وغير بانتظار الدفع، وهو نفس تعريف اللوحة. النسب مقارنةً بكل طلبات المتجر في الفترة نفسها.';
+}
+
 /* ============ المشتريات: ما يبحث عنه الزوار ولا نملكه (من خدمة البحث عبر الخادم؛ السر لا يصل المتصفح أبداً) ============ */
 let buyData = null, buyErr = '', buyMode = 'missing', buyAt = 0, buySeq = 0;
 const BUY_MSG = {not_configured:'تقرير البحث غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
@@ -1010,13 +1079,14 @@ $('#buyExport').addEventListener('click', () => {
 });
 
 /* ============ تبويبات اللوحة ============ */
-const TABS = ['overview','products','sales','cancel','ops','buy','cx'];
+const TABS = ['overview','products','sales','cancel','ops','care','buy','cx'];
 function setTab(t, keep){
   if(!TABS.includes(t)) t = 'overview';
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
   if(t==='buy') setTimeout(() => loadBuy(), 0);
+  if(t==='care') setTimeout(() => { const v = state.view; if(v) loadCare(v.from, v.to); }, 0);
   requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
 }
 document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => { setTab(b.dataset.t); window.scrollTo({top:0}); }));
@@ -1326,6 +1396,7 @@ async function update(){
   renderCategories(cur);
   loadBasket(from, to);
   loadMonths();
+  if(document.body.dataset.tab==='care') loadCare(from, to);
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);
   prodRows = cur.products; prodTotal = cur.productsCount ?? cur.products.length; renderProducts();
   state.view = {from, to, cur, prev};

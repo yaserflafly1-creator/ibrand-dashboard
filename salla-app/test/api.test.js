@@ -260,3 +260,27 @@ test('search-gaps: key stays server-side; friendly errors; Salla token or share 
   assert.equal((await (await get(env, '/api/search-gaps')).json()).missing.length, 80);   // توكن سلة: القائمة كاملة (حتى 500)
   assert.equal((await worker.fetch(new Request('https://x.test/api/search-gaps', { headers: { authorization: 'Share ' + '0'.repeat(32) } }), env)).status, 401);
 });
+
+test('care-orders: tagged orders only (tag filter param), valid vs canceled, share of all orders; refuses when tag filter is ignored', async () => {
+  const env = mkEnv();
+  const ord = (id, d, status, total, pm = 'cod') => ({ id, reference_id: 900 + id, total: { amount: total }, date: { date: d + ':00.000000' }, status: { slug: status }, draft: false, payment_method: pm, items: [] });
+  const seen = [];
+  const ignoreFilter = { on: false };
+  mockFetch(good, { '/orders': (u) => {
+    const q = new URL(u).searchParams; seen.push(q.get('tags[0]'));
+    if (q.get('tags[0]') && !ignoreFilter.on) return ok([ord(1, '2026-10-10 09:00', 'completed', 100), ord(2, '2026-10-10 10:00', 'canceled', 40), ord(3, '2026-10-11 10:00', 'under_review', 60, 'mada'), ord(4, '2026-10-11 11:00', 'payment_pending', 5), ord(5, '2026-10-12 11:00', 'completed', 999)], { total: 5, totalPages: 1 });
+    return ok([ord(9, '2026-10-10 09:00', 'completed', 1)], { total: 100, totalPages: 4 });
+  } });
+  await seedDay(env, '2026-10-10', [{ t: 100 }, { t: 100 }]); await seedDay(env, '2026-10-11', [{ t: 100 }]);
+  const j = await (await get(env, '/api/care-orders?from=2026-10-10&to=2026-10-11')).json();
+  assert.ok(seen.includes('52805995'));                                   // وسم خدمة العملاء مرسل لسلة
+  assert.equal(j.valid, 2); assert.equal(j.revenue, 160); assert.equal(j.canceled, 1); assert.equal(j.unpaid, 1); assert.equal(j.aov, 80);
+  assert.deepEqual(j.series, [['2026-10-10', 1, 100], ['2026-10-11', 1, 60]]);   // 2026-10-12 خارج الفترة
+  assert.equal(j.all.orders, 3); assert.equal(j.shareOrders, Math.round(2 / 3 * 10000) / 100);
+  assert.equal(j.pay.find((x) => x.k === 'mada').orders, 1);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/care-orders?from=2026-10-10&to=2026-10-11'), env)).status, 401);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
+  assert.equal((await worker.fetch(new Request('https://x.test/api/care-orders?from=2026-10-10&to=2026-10-11', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
+  __clearMemo(); ignoreFilter.on = true;
+  assert.equal((await (await get(env, '/api/care-orders?from=2026-10-10&to=2026-10-11')).json()).error, 'tag_filter_ignored');
+});

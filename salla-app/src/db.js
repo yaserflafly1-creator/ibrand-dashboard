@@ -64,6 +64,12 @@ export async function monthlyStats(db, m, from, to) {
   return results.map((r) => ({ m: r.m, days: r.days, revenue: r.revenue || 0, orders: r.orders || 0, units: r.units || 0, canceled: r.canceled || 0, canceledValue: r.canceledValue || 0 }));
 }
 
+// إجمالي الطلبات الصالحة والمبيعات في الفترة (لنسبة طلبات خدمة العملاء من الكل)
+export async function rangeTotals(db, m, from, to) {
+  const r = await db.prepare("SELECT SUM(json_extract(data, '$.valid')) AS orders, SUM(json_extract(data, '$.revenue')) AS revenue FROM day_agg WHERE merchant = ? AND day BETWEEN ? AND ?").bind(m, from, to).first();
+  return { orders: r?.orders || 0, revenue: Math.round((r?.revenue || 0) * 100) / 100 };
+}
+
 // الأيام المخزّنة فعلاً (حتى الأيام بلا طلبات تُكتب صفاً فارغاً) لاكتشاف الفجوات
 export async function loadedDays(db, m, from, to) {
   // اليوم «محمَّل» إن وُجد ملخصه وتحليل سلته معاً (فيُعاد جلب أيام سابقة لإضافة ميزة جديدة تلقائياً)

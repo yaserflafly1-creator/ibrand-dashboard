@@ -1,6 +1,6 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats } from './db.js';
+import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
@@ -391,6 +391,58 @@ async function handleSearchGaps(req, env) {
   } catch (e) { return json({ error: 'unreachable' }); }
 }
 
+/* ---------- /api/care-orders: الطلبات المنشأة من فريق خدمة العملاء (طلبات عليها وسم «Customer Care Team») ----------
+   يُفلتر في سلة بمعرّف الوسم (CARE_TAG_ID). أرقام مجمّعة فقط بلا بيانات عملاء، فتُتاح أيضاً عبر روابط المشاركة. */
+const CARE_MAX_PAGES = 100, CARE_DEFAULT_TAG = '52805995';
+async function handleCare(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  const q = new URL(req.url).searchParams;
+  if (!validRange(q)) return json({ error: 'bad range' }, 400);
+  let from = q.get('from'), to = q.get('to');
+  if (from > to) [from, to] = [to, from];
+  if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > 800) return json({ error: 'range too long' }, 400);
+  const tag = String(env.CARE_TAG_ID || CARE_DEFAULT_TAG);
+  const ttl = to < riyadhDay(Date.now()) ? 600e3 : 90e3;
+  try {
+    const text = await memo(`care:${ctx.merchant}:${tag}:${from}:${to}`, ttl, async () => {
+      const get = ctx.get || makeClient(env, ctx.merchant, await (async () => { const t = await loadTokens(env, ctx.merchant); if (!t) throw new Error('salla 403 app not installed'); return t; })());
+      const page = (n, tagged) => get('/orders', { from_date: addDays(from, -1), to_date: addDays(to, 1), per_page: 30, page: n, ...(tagged ? { 'tags[0]': tag } : {}) });
+      const [first, plain] = await Promise.all([page(1, true), page(1, false)]);
+      const taggedTotal = first.pagination?.total ?? 0, plainTotal = plain.pagination?.total ?? 0;
+      if (plainTotal > 30 && taggedTotal >= plainTotal) throw Object.assign(new Error('tag filter ignored'), { careErr: 'tag_filter_ignored' });   // لا نعرض كل الطلبات على أنها طلبات الفريق
+      const pages = first.pagination?.totalPages || 1;
+      if (pages > CARE_MAX_PAGES) throw Object.assign(new Error('too many orders'), { careErr: 'too_many' });
+      const batches = [first, ...(pages > 1 ? await pool(Array.from({ length: pages - 1 }, (_, k) => k + 2), 8, (n) => page(n, true)) : [])];
+      const days = {}, status = {}, pay = {};
+      let valid = 0, revenue = 0, canceled = 0, canceledValue = 0, unpaid = 0, all = 0;
+      for (const o of batches.flatMap((j) => j.data || [])) {
+        const day = String(o.date?.date || '').slice(0, 10);
+        if (o.draft || day < from || day > to) continue;
+        all++;
+        const st = mapStatus(o.status?.slug), total = Number(o.total?.amount) || 0;
+        status[st] = (status[st] || 0) + 1;
+        if (st === 'canceled') { canceled++; canceledValue += total; continue; }
+        if (st === 'unpaid' || st === 'refunded') { if (st === 'unpaid') unpaid++; continue; }
+        valid++; revenue += total;
+        const d = days[day] || (days[day] = [0, 0]); d[0]++; d[1] += total;
+        const pm = o.payment_method || 'other'; const p = pay[pm] || (pay[pm] = [0, 0]); p[0]++; p[1] += total;
+      }
+      await ensureSchema(env.DB);
+      const totals = await rangeTotals(env.DB, ctx.merchant, from, to);
+      const r2 = (n) => Math.round(n * 100) / 100;
+      return JSON.stringify({ tag, orders: all, valid, revenue: r2(revenue), aov: valid ? r2(revenue / valid) : 0, canceled, canceledValue: r2(canceledValue), unpaid, status,
+        series: Object.entries(days).sort(([a], [b]) => (a < b ? -1 : 1)).map(([d, [n, v]]) => [d, n, r2(v)]),
+        pay: Object.entries(pay).map(([k, [n, v]]) => ({ k, orders: n, total: r2(v) })).sort((a, b) => b.total - a.total),
+        all: totals, shareOrders: totals.orders ? r2(valid / totals.orders * 100) : 0, shareRevenue: totals.revenue ? r2(revenue / totals.revenue * 100) : 0 });
+    });
+    return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  } catch (e) {
+    if (e.careErr) return json({ error: e.careErr });
+    throw e;
+  }
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -494,6 +546,7 @@ export default {
       if (pathname === '/api/export.csv' && req.method === 'GET') return await handleExport(req, env);
       if (pathname === '/api/months' && req.method === 'GET') return await handleMonths(req, env);
       if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
+      if (pathname === '/api/care-orders' && req.method === 'GET') return await handleCare(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
