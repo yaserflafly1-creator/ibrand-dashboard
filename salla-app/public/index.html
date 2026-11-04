@@ -244,7 +244,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .buy-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px}
-@media (max-width:640px){#careKpis{grid-template-columns:1fr 1fr!important}#carePanel table{min-width:0!important;width:100%}#carePanel th,#carePanel td{padding:10px 6px;font-size:.8rem}#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
+@media (max-width:640px){#aiKpis{grid-template-columns:1fr 1fr!important}#aiPanel table{min-width:0!important;width:100%}#aiPanel th,#aiPanel td{padding:10px 6px;font-size:.8rem}#careKpis{grid-template-columns:1fr 1fr!important}#carePanel table{min-width:0!important;width:100%}#carePanel th,#carePanel td{padding:10px 6px;font-size:.8rem}#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
 /* تبويبات اللوحة: كل قسم يحمل data-tab؛ الأقسام الجديدة تُضاف بإعطائها data-tab فقط */
 .tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 12px;position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg,#fdf2f8) 78%,transparent);scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -258,6 +258,7 @@ body[data-tab="ops"] [data-tab]:not([data-tab="ops"]){display:none!important}
 body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
 body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
 body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
+body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
 /* كمل احتياجك */
 .cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
@@ -339,6 +340,7 @@ body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
     <button type="button" role="tab" data-t="ops">المخزون والشحن</button>
     <button type="button" role="tab" data-t="care">خدمة العملاء</button>
     <button type="button" role="tab" data-t="buy">المشتريات</button>
+    <button type="button" role="tab" data-t="ai">المساعد الذكي</button>
     <button type="button" role="tab" data-t="cx">كمل احتياجك</button>
   </nav>
 
@@ -571,6 +573,14 @@ body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
       <div class="tbl-wrap"><table><thead><tr><th>حالة الطلب</th><th>العدد</th></tr></thead><tbody id="careStatus"></tbody></table></div>
     </div>
     <p class="period-note" id="careNote" style="margin:10px 0 0"></p>
+  </section>
+
+  <section data-tab="ai" class="card panel sec" id="aiPanel">
+    <div class="panel-h"><div><h2>المساعد الذكي</h2><p id="aiSub">أرقام المساعد في المتجر · آخر 30 يوماً (لا تتأثر بفلتر التاريخ) · أرقام فقط بلا نصوص محادثات</p></div></div>
+    <div class="mini-kpis" id="aiKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="chart-box" style="height:240px"><canvas id="aiChart" dir="ltr"></canvas></div>
+    <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>المؤشر</th><th>النسبة</th></tr></thead><tbody id="aiRates"></tbody></table></div>
+    <p class="period-note" id="aiNote" style="margin:10px 0 0"></p>
   </section>
 
   <section data-tab="buy" class="card panel sec" id="buyPanel">
@@ -1048,6 +1058,52 @@ document.addEventListener('click', async e => {
   finally{ btn.disabled = false; btn.textContent = old; }
 });
 
+/* ============ المساعد الذكي (أرقام فقط من خدمة ibrand-search عبر الخادم؛ السر لا يصل المتصفح) ============ */
+let aiData = null, aiErr = '', aiAt = 0, aiSeq = 0, aiChart = null;
+const AI_MSG = {not_configured:'تقرير المساعد غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', not_ready:'تقرير المساعد غير منشور بعد في خدمة البحث.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
+const AI_LBL = {msgs:'الرسائل', messages:'الرسائل', handoffs:'التحويلات', handoff:'التحويلات', transfers:'التحويلات', escalations:'التحويلات', carts:'إضافات السلة', cart_adds:'إضافات السلة', ratings:'التقييمات', rating:'التقييمات', ratings_up:'تقييمات إيجابية', ratings_down:'تقييمات سلبية', up:'إيجابية', down:'سلبية',
+  tokens:'التوكنز', conversations:'المحادثات', chats:'المحادثات', sessions:'الجلسات', users:'الزوار', visitors:'الزوار', products:'منتجات مقترحة', clicks:'النقرات',
+  cart_rate:'نسبة إضافة السلة', handoff_rate:'نسبة التحويل', rating_rate:'نسبة التقييم', carts_per_msg:'إضافات السلة لكل رسالة'};
+const aiLabel = k => AI_LBL[k] || k.replace(/_/g,' ');
+const AI_ORDER = ['msgs','messages','conversations','chats','handoffs','handoff','transfers','escalations','carts','cart_adds','ratings','rating','tokens'];
+function demoAi(){
+  const daily = [], t = new Date(); for(let i=29;i>=0;i--){ const d = new Date(t.getFullYear(), t.getMonth(), t.getDate()-i); const m = 20+((i*7)%23); daily.push({day:ymd(d), msgs:m, carts:Math.round(m/9), handoffs:Math.round(m/12), tokens:m*420}); }
+  const sum = k => daily.reduce((a,x) => a+x[k], 0);
+  return {generated_at:Date.now(), totals:{msgs:sum('msgs'), handoffs:sum('handoffs'), carts:sum('carts'), ratings:41, tokens:sum('tokens')}, rates:{cart_rate:9.1, handoff_rate:7.4}, daily};
+}
+async function loadAi(force){
+  if(!force && aiData && Date.now()-aiAt < 300e3) return;
+  const seq = ++aiSeq;
+  try{
+    const d = LIVE ? await api('/api/chat-stats') : demoAi();
+    if(seq !== aiSeq) return;
+    if(d.error){ aiErr = d.error; aiData = null; } else { aiErr = ''; aiData = d; aiAt = Date.now(); }
+  }catch(e){ if(seq !== aiSeq) return; aiErr = e.status===401 ? 'unauthorized' : 'unreachable'; aiData = null; }
+  renderAi();
+}
+function renderAi(){
+  if(!$('#aiPanel')) return;
+  if(!aiData){
+    $('#aiKpis').innerHTML = ''; $('#aiRates').innerHTML = '';
+    $('#aiNote').textContent = AI_MSG[aiErr] || (aiErr==='unauthorized' ? 'انتهت صلاحية الرابط.' : 'جارٍ التحميل…');
+    if(aiChart){ aiChart.destroy(); aiChart = null; } return;
+  }
+  const D = aiData, keys = Object.keys(D.totals).sort((a,b) => { const ia = AI_ORDER.indexOf(a), ib = AI_ORDER.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); }).slice(0,8);
+  $('#aiKpis').innerHTML = keys.length ? keys.map(k => `<div class="mini"><b>${fmt(D.totals[k])}</b><span>${esc(aiLabel(k))}</span></div>`).join('') : '<div class="empty" style="grid-column:1/-1">لا توجد أرقام بعد</div>';
+  const rr = Object.entries(D.rates || {});
+  $('#aiRates').innerHTML = rr.length ? rr.map(([k,v]) => `<tr><td>${esc(aiLabel(k))}</td><td>${v.toFixed(1)}%</td></tr>`).join('') : '<tr><td colspan="2" class="empty">لا توجد نسب</td></tr>';
+  // الرسم: الرسائل وإضافات السلة (أو أكبر حقلين رقميين) لآخر 30 يوماً مع ملء الأيام الفارغة بصفر
+  const num = new Set(); D.daily.forEach(x => Object.keys(x).forEach(k => { if(k!=='day') num.add(k); }));
+  let cols = ['msgs','carts'].filter(k => num.has(k));
+  if(!cols.length) cols = [...num].sort((a,b) => D.daily.reduce((s,x) => s+(x[b]||0),0) - D.daily.reduce((s,x) => s+(x[a]||0),0)).slice(0,2);
+  const t = new Date(), days = []; for(let i=29;i>=0;i--) days.push(ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate()-i)));
+  const byDay = new Map(D.daily.map(x => [x.day, x])), colors = ['#ec4899','#7c3aed','#14b8a6'];
+  const data = {labels:days.map(d => d.slice(5)), datasets:cols.map((k,i) => ({label:aiLabel(k), data:days.map(d => (byDay.get(d)||{})[k] || 0), backgroundColor:colors[i], borderRadius:4}))};
+  const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:8}}}, scales:{x:{grid:{display:false}, ticks:{maxTicksLimit:10}}, y:{beginAtZero:true, ticks:{precision:0}}}};
+  if(aiChart){ aiChart.data = data; aiChart.options = opts; aiChart.update(); } else aiChart = new Chart($('#aiChart'), {type:'bar', data, options:opts});
+  $('#aiNote').textContent = `آخر تحديث للتقرير: ${D.generated_at ? new Date(D.generated_at).toLocaleString('en-GB') : '—'}. أرقام مجمّعة فقط؛ لا تُعرض هنا أي نصوص محادثات.`;
+}
+
 /* ============ المشتريات: ما يبحث عنه الزوار ولا نملكه (من خدمة البحث عبر الخادم؛ السر لا يصل المتصفح أبداً) ============ */
 let buyData = null, buyErr = '', buyMode = 'missing', buyAt = 0, buySeq = 0;
 const BUY_MSG = {not_configured:'تقرير البحث غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
@@ -1096,13 +1152,14 @@ $('#buyExport').addEventListener('click', () => {
 });
 
 /* ============ تبويبات اللوحة ============ */
-const TABS = ['overview','products','sales','cancel','ops','care','buy','cx'];
+const TABS = ['overview','products','sales','cancel','ops','care','buy','ai','cx'];
 function setTab(t, keep){
   if(!TABS.includes(t)) t = 'overview';
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
   if(t==='buy') setTimeout(() => loadBuy(), 0);
+  if(t==='ai') setTimeout(() => loadAi(), 0);
   if(t==='care') setTimeout(() => { const v = state.view; if(v) loadCare(v.from, v.to); }, 0);
   requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
 }

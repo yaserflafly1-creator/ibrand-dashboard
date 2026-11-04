@@ -289,3 +289,25 @@ test('care-orders: tagged orders only (tag filter param), valid vs canceled, sha
   __clearMemo(); ignoreFilter.on = true;
   assert.equal((await (await get(env, '/api/care-orders?from=2026-10-10&to=2026-10-11')).json()).error, 'tag_filter_ignored');
 });
+
+test('chat-stats: numbers only from /report/chat via binding; key server-side; errors friendly; share allowed', async () => {
+  const sample = { generated_at: 1793500000000, totals: { msgs: 120, carts: 9, handoffs: 4, ratings: { up: 5, down: 1 }, tokens: 52000, note: 'نص عميل سري' },
+    rates_percent: { cart_rate: 7.5, handoff_rate: 3.3 }, daily: [{ day: '2026-11-01', msgs: 10, carts: 1, text: 'سري' }, { day: 'bad', msgs: 1 }, { date: '2026-11-02', msgs: 5 }], messages: [{ text: 'محادثة سرية' }] };
+  let seen = null, status = 200;
+  const env = { ...mkEnv(), REPORT_KEY: 'sekret-123', SEARCH: { fetch: async (u, init) => { seen = { u, key: init.headers['x-report-key'] }; return new Response(JSON.stringify(sample), { status }); } } };
+  mockFetch(good);
+  const r = await get(env, '/api/chat-stats'); assert.equal(r.status, 200);
+  const body = await r.text(); assert.ok(!body.includes('sekret-123') && !body.includes('سري') && !body.includes('محادثة'));
+  const j = JSON.parse(body);
+  assert.match(seen.u, /\/report\/chat$/); assert.equal(seen.key, 'sekret-123');
+  assert.equal(j.totals.msgs, 120); assert.equal(j.totals.ratings_up, 5); assert.equal(j.totals.note, undefined); assert.equal(j.rates.cart_rate, 7.5);
+  assert.deepEqual(j.daily.map((x) => x.day), ['2026-11-01', '2026-11-02']); assert.equal(j.daily[0].text, undefined);
+  __clearMemo(); status = 401; assert.equal((await (await get(env, '/api/chat-stats')).json()).error, 'bad_key');
+  __clearMemo(); status = 503; assert.equal((await (await get(env, '/api/chat-stats')).json()).error, 'disabled');
+  __clearMemo(); status = 404; assert.equal((await (await get(env, '/api/chat-stats')).json()).error, 'not_ready');
+  __clearMemo(); status = 500; assert.equal((await (await get(env, '/api/chat-stats')).json()).error, 'unreachable');
+  __clearMemo(); status = 200; assert.equal((await (await get({ ...env, REPORT_KEY: undefined }, '/api/chat-stats')).json()).error, 'not_configured');
+  assert.equal((await worker.fetch(new Request('https://x.test/api/chat-stats'), env)).status, 401);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
+  assert.equal((await worker.fetch(new Request('https://x.test/api/chat-stats', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
+});

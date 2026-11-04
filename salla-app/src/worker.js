@@ -462,6 +462,41 @@ async function handleCare(req, env) {
   }
 }
 
+/* ---------- /api/chat-stats: أرقام «المساعد الذكي» من خدمة ibrand-search (GET /report/chat، نفس REPORT_KEY) ----------
+   أرقام فقط بلا نصوص محادثات (اللوحة تُشارَك بروابط). نُمرّر الأرقام فقط ونُسطّح الحقول المتداخلة، فلا يصل أي نص حرّ من الخدمة للصفحة. */
+const flatNums = (o, pre = '', depth = 0, out = {}) => {
+  if (!o || typeof o !== 'object' || Array.isArray(o) || depth > 2) return out;
+  for (const [k, v] of Object.entries(o)) {
+    const key = (pre ? pre + '_' : '') + String(k).replace(/[^A-Za-z0-9_]/g, '').slice(0, 40);
+    if (!key) continue;
+    if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+    else if (v && typeof v === 'object' && !Array.isArray(v)) flatNums(v, key, depth + 1, out);
+  }
+  return out;
+};
+async function handleChatStats(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  if (!env.REPORT_KEY) return json({ error: 'not_configured' });
+  try {
+    const hit = memoStore.get('chatstats');
+    if (hit && hit.exp > Date.now()) return new Response(hit.v, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    const init = { headers: { 'x-report-key': env.REPORT_KEY } };
+    const base = (env.SEARCH_URL || SEARCH_DEFAULT_URL).replace(/\/report\/data$/, '');
+    const r = env.SEARCH ? await env.SEARCH.fetch('https://search.internal/report/chat', init) : await fetch(base + '/report/chat', init);
+    if (r.status === 401) return json({ error: 'bad_key' });
+    if (r.status === 503) return json({ error: 'disabled' });
+    if (r.status === 404) return json({ error: 'not_ready' });
+    if (!r.ok) return json({ error: 'unreachable', status: r.status });
+    const d = await r.json();
+    const daily = (Array.isArray(d.daily) ? d.daily : []).slice(-366).map((x) => ({ day: String(x?.day ?? x?.date ?? '').slice(0, 10), ...flatNums(x) })).filter((x) => DATE_RE.test(x.day));
+    const text = JSON.stringify({ generated_at: Number(d.generated_at) || 0, totals: flatNums(d.totals), rates: flatNums(d.rates_percent), daily });
+    if (memoStore.size > 120) memoStore.clear();
+    memoStore.set('chatstats', { v: text, exp: Date.now() + 300e3 });
+    return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  } catch (e) { return json({ error: 'unreachable' }); }
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -566,6 +601,7 @@ export default {
       if (pathname === '/api/months' && req.method === 'GET') return await handleMonths(req, env);
       if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
       if (pathname === '/api/care-orders' && req.method === 'GET') return await handleCare(req, env);
+      if (pathname === '/api/chat-stats' && req.method === 'GET') return await handleChatStats(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
