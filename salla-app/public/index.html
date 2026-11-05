@@ -586,7 +586,7 @@ body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
   <section data-tab="buy" class="card panel sec" id="buyPanel">
     <div class="panel-h">
       <div><h2>ما يبحث عنه الزوار ولا نملكه</h2><p id="buySub">من خدمة البحث في المتجر · للمشتريات</p></div>
-      <button class="btn" id="buyExport" type="button">تصدير CSV</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="buyRefresh" type="button">تحديث</button><button class="btn" id="buyExport" type="button">تصدير CSV</button></div>
     </div>
     <div class="mini-kpis" id="buyKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div class="buy-tools">
@@ -1075,7 +1075,7 @@ async function loadAi(force){
   if(!force && aiData && Date.now()-aiAt < 300e3) return;
   const seq = ++aiSeq;
   try{
-    const d = LIVE ? await api('/api/chat-stats') : demoAi();
+    const d = LIVE ? await api('/api/chat-stats', {cache:'no-store'}) : demoAi();
     if(seq !== aiSeq) return;
     if(d.error){ aiErr = d.error; aiData = null; } else { aiErr = ''; aiData = d; aiAt = Date.now(); }
   }catch(e){ if(seq !== aiSeq) return; aiErr = e.status===401 ? 'unauthorized' : 'unreachable'; aiData = null; }
@@ -1118,12 +1118,19 @@ async function loadBuy(force){
   if(!force && buyData && Date.now()-buyAt < 300e3) return;
   const seq = ++buySeq;
   try{
-    const d = LIVE ? await api('/api/search-gaps') : demoBuy();
+    const d = LIVE ? await api('/api/search-gaps', {cache:'no-store'}) : demoBuy();
     if(seq !== buySeq) return;
     if(d.error){ buyErr = d.error; buyData = null; } else { buyErr = ''; buyData = d; buyAt = Date.now(); }
   }catch(e){ if(seq !== buySeq) return; buyErr = e.status===401 ? 'unauthorized' : 'unreachable'; buyData = null; }
   renderBuy();
 }
+const ageText = ms => { const m = Math.max(0, Math.round((Date.now()-ms)/60000)); return m < 1 ? 'الآن' : m < 60 ? `قبل ${m} دقيقة` : m < 1440 ? `قبل ${Math.round(m/60)} ساعة` : `قبل ${Math.round(m/1440)} يوم`; };
+function buyStamp(){
+  const el = $('#buySub'); if(!el) return;
+  const g = buyData && buyData.generated_at;
+  el.textContent = 'من خدمة البحث في المتجر · للمشتريات' + (g ? ` · وقت توليد التقرير: ${new Date(g).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} (${ageText(g)})` : '');
+}
+setInterval(buyStamp, 30000);
 function buyList(){ const q = ($('#buyFilter').value||'').trim().toLowerCase(); return ((buyData && buyData[buyMode]) || []).filter(x => !q || x.q.toLowerCase().includes(q)); }
 function renderBuy(){
   if(!$('#buyPanel')) return;
@@ -1137,8 +1144,10 @@ function renderBuy(){
   $('#buyRows').innerHTML = rows.length ? rows.map(x => `<tr><td dir="auto">${esc(x.q)}</td><td>${fmt(x.total)}</td><td>${fmt(x.zero)}</td>
     <td>${x.results>0 ? `<span style="color:#16a34a;font-weight:700">متوفر (${fmt(x.results)})</span>` : '<span style="color:#dc2626;font-weight:700">غير موجود</span>'}</td>
     <td>${x.last ? fmtDate(x.last) : '—'}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">لا توجد نتائج</td></tr>';
+  buyStamp();
   $('#buyNote').textContent = `آخر تحديث للتقرير: ${buyData.generated_at ? new Date(buyData.generated_at).toLocaleString('en-GB') : '—'}. الأرقام تخص عمليات البحث المرسلة بالإنتر أو بالضغط على نتيجة فقط، فهي أقل من الحقيقي.`;
 }
+$('#buyRefresh').addEventListener('click', () => { loadBuy(true); toast('جارٍ تحديث تقرير البحث…'); });
 document.querySelectorAll('#buyMode button').forEach(b => b.addEventListener('click', () => { buyMode = b.dataset.m; document.querySelectorAll('#buyMode button').forEach(x => x.classList.toggle('on', x===b)); renderBuy(); }));
 $('#buyFilter').addEventListener('input', () => { if(buyData) renderBuy(); });
 $('#buyExport').addEventListener('click', () => {
@@ -1158,8 +1167,8 @@ function setTab(t, keep){
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
-  if(t==='buy') setTimeout(() => loadBuy(), 0);
-  if(t==='ai') setTimeout(() => loadAi(), 0);
+  if(t==='buy') setTimeout(() => loadBuy(true), 0);   // كل فتح للتبويب يجلب من الخادم (الخادم يحتفظ بالرد دقيقة فقط)
+  if(t==='ai') setTimeout(() => loadAi(true), 0);
   if(t==='care') setTimeout(() => { const v = state.view; if(v) loadCare(v.from, v.to); }, 0);
   requestAnimationFrame(() => { if(window.Chart) Object.values(Chart.instances).forEach(c => { try{ c.resize(); }catch(e){} }); });
 }
@@ -1621,7 +1630,7 @@ async function loadShipments(){
 function stamp(){
   $('#lastUpdated').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-SA-u-nu-latn', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) + (LIVE ? '' : ' (بيانات تجريبية)');
 }
-async function refreshNow(){ await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments()]); }
+async function refreshNow(){ const t = document.body.dataset.tab; await Promise.all([update(), loadInventory(), loadCoupons(), loadShipments(), t==='buy' ? loadBuy(true) : t==='ai' ? loadAi(true) : 0]); }
 let autoTimer = null;
 function scheduleAuto(){
   clearInterval(autoTimer);

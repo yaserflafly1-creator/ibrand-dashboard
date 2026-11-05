@@ -366,6 +366,7 @@ async function handleMonths(req, env) {
 /* ---------- /api/search-gaps: ما يبحث عنه الزوار ولا نملكه (من خدمة ibrand-search؛ للمشتريات) ----------
    الرقم السري REPORT_KEY سر Worker يُقرأ من الخادم فقط ولا يصل المتصفح. متاح بتوكن سلة وبرابط المشاركة (قرار صاحب المشروع؛ خدمة البحث تحجب الجوال والبريد)، وفي المشاركة نُرسل أول 50 عبارة فقط من كل قائمة */
 const SHARE_GAP_ROWS = 50;
+const SEARCH_CACHE_MS = 60e3;
 const SEARCH_DEFAULT_URL = 'https://ibrand-search.ibrandsales.workers.dev/report/data';
 const gapRows = (a) => (Array.isArray(a) ? a : []).slice(0, 500).map((x) => ({ q: String(x?.q ?? '').slice(0, 120), total: Number(x?.total) || 0, zero: Number(x?.zero) || 0, results: Number(x?.results) || 0, first: Number(x?.first) || 0, last: Number(x?.last) || 0 }));
 async function handleSearchGaps(req, env) {
@@ -386,7 +387,7 @@ async function handleSearchGaps(req, env) {
     const text = JSON.stringify({ generated_at: Number(d.generated_at) || 0, totals: { searches: Number(t.searches) || 0, zero_searches: Number(t.zero_searches) || 0, missing_phrases: Number(t.missing_phrases) || 0, recovered_phrases: Number(t.recovered_phrases) || 0 },
       missing: gapRows(d.missing), codes: gapRows(d.codes), recovered: gapRows(d.recovered), top: gapRows(d.top) });
     if (memoStore.size > 120) memoStore.clear();
-    memoStore.set('searchgaps', { v: text, exp: Date.now() + 300e3 });   // أخطاء الخدمة لا تُخزَّن
+    memoStore.set('searchgaps', { v: text, exp: Date.now() + SEARCH_CACHE_MS });   // ذاكرة مؤقتة داخل الـ isolate فقط (لا KV ولا D1 ولا Cache API) لدقيقة؛ أخطاء الخدمة لا تُخزَّن
     return new Response(cut(text), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (e) { return json({ error: 'unreachable' }); }
 }
@@ -492,7 +493,7 @@ async function handleChatStats(req, env) {
     const daily = (Array.isArray(d.daily) ? d.daily : []).slice(-366).map((x) => ({ day: String(x?.day ?? x?.date ?? '').slice(0, 10), ...flatNums(x) })).filter((x) => DATE_RE.test(x.day));
     const text = JSON.stringify({ generated_at: Number(d.generated_at) || 0, totals: flatNums(d.totals), rates: flatNums(d.rates_percent), daily });
     if (memoStore.size > 120) memoStore.clear();
-    memoStore.set('chatstats', { v: text, exp: Date.now() + 300e3 });
+    memoStore.set('chatstats', { v: text, exp: Date.now() + SEARCH_CACHE_MS });
     return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
   } catch (e) { return json({ error: 'unreachable' }); }
 }
