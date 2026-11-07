@@ -650,9 +650,10 @@ async function jobStep(env, merchant, batch) {
   const tokens = await loadTokens(env, merchant); if (!tokens) return job;
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
   let added = 0, missed = 0, errors = 0, found = 0, lastErr = ''; const st = { ex: 0, low: 0, rv: 0 };
-  for (const name of take) {
+  const one = async (name) => {
     try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, job.only ? null : rivals, job.only ? 0.25 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
-  }
+  };
+  for (let k = 0; k < take.length; k += 3) await Promise.all(take.slice(k, k + 3).map(one));   // 3 منتجات بالتوازي
   job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr; job.sk = { ex: ((job.sk || {}).ex || 0) + st.ex, low: ((job.sk || {}).low || 0) + st.low, rv: ((job.sk || {}).rv || 0) + st.rv };
   await setMeta(env.DB, merchant, JOB, job);
   return job;
@@ -684,8 +685,9 @@ async function handleCompetitors(req, env) {
     for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && (rivalOf(r.product, r.title, rv) || matchScore(r.product, r.title) < 0.35)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
     return json({ ignored: n });
   }
+  if (sub === '/job' && b.stop) { await setMeta(env.DB, merchant, JOB, null); return json(jobView(null)); }
   if (sub === '/job') return json(jobView(b.restart ? (await setMeta(env.DB, merchant, JOB, null), await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))) : await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))));
-  if (sub === '/job/step') return json(jobView(await jobStep(env, merchant, 3)));
+  if (sub === '/job/step') return json(jobView(await jobStep(env, merchant, 6)));
   if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
