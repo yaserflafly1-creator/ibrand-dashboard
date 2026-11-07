@@ -615,10 +615,16 @@ async function handleCompetitors(req, env) {
     const product = String(l?.product || '').trim().slice(0, 200), competitor = String(l?.competitor || '').trim().slice(0, 60), url = validCompetitorUrl(l?.url || '');
     if (!product || !competitor) rejected.push({ product, reason: 'المنتج أو المنافس ناقص' });
     else if (!url) rejected.push({ product, reason: 'الرابط غير صالح (يجب أن يكون https لموقع المنافس)' });
-    else added.push({ id: await compUpsert(env.DB, merchant, { product, competitor, url }), product, competitor });
+    else {
+      const id = await compUpsert(env.DB, merchant, { product, competitor, url });
+      const pr = Number(l?.price);
+      if (Number.isFinite(pr) && pr > 0 && pr < 1e6) await compSave(env.DB, merchant, id, { ok: true, price: pr, currency: 'SAR', avail: l.avail === 1 || l.avail === 0 ? l.avail : null, title: String(l.title || '').slice(0, 200) }, Date.now(), riyadhDay(Date.now()));   // اقتراح مُعتمد: سعره قُرئ للتو، فلا ننتظر الجدول
+      else added.push({ id, product, competitor });
+      if (Number.isFinite(pr) && pr > 0 && pr < 1e6) added.push({ id, product, competitor, done: true });
+    }
   }
   const results = [];
-  if (b.check !== false && added.length && added.length <= 5) for (const a of added) results.push({ id: a.id, ...(await checkComp(env, merchant, a.id)) });   // القليل نفحصه فوراً؛ والباقي يفحصه الجدول المجدول
+  if (b.check !== false && added.length && added.length <= 5) for (const a of added.filter((x) => !x.done)) results.push({ id: a.id, ...(await checkComp(env, merchant, a.id)) });   // القليل نفحصه فوراً؛ والباقي يفحصه الجدول المجدول
   return json({ added: added.length, rejected, results });
 }
 export async function compCron(env, now = Date.now()) {

@@ -1209,7 +1209,7 @@ $('#compSuggest').addEventListener('click', async () => {
   btn.disabled = false;
 });
 $('#compSugApply').addEventListener('click', async () => {
-  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url}));
+  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title}));   // السعر مقروء للتو فيُحفظ فوراً
   if(!lines.length){ toast('لم تحدد شيئاً'); return; }
   try{ const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines, check:false})}); toast(`أُضيف ${r.added} للمراقبة`); compSug = compSug.filter(x => !x.on); renderSug(); }
   catch(err){ toast('تعذّر الاعتماد'); }

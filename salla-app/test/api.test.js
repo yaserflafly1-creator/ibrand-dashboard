@@ -326,6 +326,9 @@ test('competitors API: add/check, our price (+VAT) vs competitor, ignore/delete,
   assert.equal(bad.added, 0); assert.equal(bad.rejected.length, 2);
   const r = await (await post('', { lines: [{ product: 'Milk', competitor: 'A-Pharm', url: 'https://a-pharm.com/p1' }] })).json();   // واحد: يُفحص فوراً
   assert.equal(r.added, 1); assert.equal(r.results[0].price, 50);
+  const pre = await (await post('', { lines: [{ product: 'Milk', competitor: 'Suggested', url: 'https://a-pharm.com/sug', price: 77.5, avail: 1, title: 'ت' }], check: false })).json();   // اقتراح معتمد بسعر جاهز
+  assert.equal(pre.added, 1); let l0 = await (await get(env, '/api/competitors')).json(); const sg = l0.items.find((x) => x.competitor === 'Suggested'); assert.equal(sg.price, 77.5); assert.ok(sg.checked > 0); assert.equal(sg.err, '');
+  await worker.fetch(new Request('https://x.test/api/competitors?id=' + sg.id, { method: 'DELETE', ...auth }), env);
   const list = await (await get(env, '/api/competitors')).json();
   assert.equal(list.items.length, 1); assert.equal(list.items[0].price, 50); assert.equal(list.items[0].ourPrice, 115);   // 100 + 15% ضريبة
   assert.equal(list.items[0].diffPct, 130); assert.equal(list.items[0].avail, 1);
