@@ -61,7 +61,9 @@ export async function checkCompetitorUrl(url, fetchFn = fetch) {
     if (!r.ok) return { err: `HTTP ${r.status}` + (r.status === 403 || r.status === 429 ? ' (الموقع يحجب الجلب الآلي)' : '') };
     const html = (await r.text()).slice(0, 2_000_000);
     const p = parseProductPage(html);
-    return p ? { ok: true, ...p } : { err: 'لا يوجد سعر منظّم في الصفحة (قد تكون الصفحة تُحمّل بالجافاسكربت)' };
+    if (p) return { ok: true, ...p };
+    if (/<meta[^>]+http-equiv=["']refresh["']/i.test(html)) return { err: 'الصفحة محوّلة لصفحة أخرى (غالباً المنتج أُزيل أو الرابط قديم)' };
+    return { err: 'لا يوجد سعر منظّم في الصفحة (قد تكون الصفحة تُحمّل بالجافاسكربت)' };
   } catch (e) { return { err: e && e.name === 'AbortError' ? 'انتهت مهلة الجلب' : 'تعذّر الجلب' }; }
   finally { clearTimeout(timer); }
 }

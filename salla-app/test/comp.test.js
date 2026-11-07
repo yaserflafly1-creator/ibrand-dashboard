@@ -34,5 +34,6 @@ test('checkCompetitorUrl: ok, HTTP errors, blocked, no price, network failure', 
   assert.match((await checkCompetitorUrl('https://a.com/p', async () => new Response('x', { status: 403 }))).err, /403.*يحجب/);
   assert.match((await checkCompetitorUrl('https://a.com/p', async () => new Response('x', { status: 404 }))).err, /404/);
   assert.match((await checkCompetitorUrl('https://a.com/p', async () => new Response('<p>بلا سعر</p>'))).err, /لا يوجد سعر/);
+  assert.match((await checkCompetitorUrl('https://a.com/p', async () => new Response('<meta http-equiv="refresh" content="0;url=\'https://a.com/\'">'))).err, /محوّلة/);
   assert.equal((await checkCompetitorUrl('https://a.com/p', async () => { throw new Error('x'); })).err, 'تعذّر الجلب');
 });
