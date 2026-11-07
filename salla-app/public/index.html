@@ -417,7 +417,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
       <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
         <b>الطريقة 1 · كل المنافسين دفعة واحدة (الأسهل)</b>
         <p class="period-note" style="margin:6px 0 8px">يبحث عن المنتجات الأكثر مبيعاً عندك في <b>كل المنافسين</b> بالباركود ثم بالاسم، <b>ويعمل على الخادم</b>: تقدر تخرج من الصفحة أو تغلقها ويكمل وحده (ويعيد البحث <b>كل أسبوع</b> لأعلى 100 منتج). الباركود يُضاف <b>«متحققاً»</b>، والاسم من 60% يُضاف <b>«غير متحقق»</b> وتظهر نسبته في عمود التطابق لتراجعه أنت (فلتر «غير متحقق منها»).</p>
-        <select id="compSugN" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="20">أعلى 20 منتجاً</option><option value="50">أعلى 50 منتجاً</option><option value="100" selected>أعلى 100 منتج</option><option value="200">أعلى 200 منتج</option></select> <button class="btn btn-primary" id="compSuggest" type="button">ابحث وأضف تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
+        <select id="compSugN" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="20">أعلى 20 منتجاً</option><option value="50">أعلى 50 منتجاً</option><option value="100" selected>أعلى 100 منتج</option><option value="200">أعلى 200 منتج</option><option value="500">أعلى 500 منتج</option><option value="1000">أعلى 1000 منتج</option></select> <select id="compSugOnly" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="">كل المنافسين</option><option value="النهدي">النهدي فقط (أوسع بحثاً)</option></select> <button class="btn btn-primary" id="compSuggest" type="button">ابحث وأضف تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
         <div id="compJobBar" class="period-note" style="margin:8px 0 0"></div>
       </div>
       <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
@@ -1218,7 +1218,7 @@ async function jobCheck(){   // عند فتح التبويب: إن كانت هن
 }
 $('#compSuggest').addEventListener('click', async () => {
   if(!LIVE){ toast('البحث التلقائي متاح داخل سلة فقط'); return; }
-  try{ const j = await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:+$('#compSugN').value || 100})}); $('#compJobBar').textContent = jobText(j); jobRun(); }
+  try{ const j = await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:+$('#compSugN').value || 100, only:$('#compSugOnly').value})}); $('#compJobBar').textContent = jobText(j); jobRun(); }
   catch(err){ toast('تعذّر بدء البحث'); }
 });
 $('#compSubmit').addEventListener('click', async () => {
