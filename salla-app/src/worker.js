@@ -579,7 +579,7 @@ async function handleCustomers(req, env) {
   return json(body);
 }
 
-/* ---------- /api/competitors: مراقبة أسعار المنافسين (توكن سلة فقط؛ بيانات تجارية حساسة) ---------- */
+/* ---------- /api/competitors: مراقبة أسعار المنافسين (القراءة لتوكن سلة أو رابط المشاركة؛ التعديل لتوكن سلة فقط) ---------- */
 const COMP_PER_RUN = 15, COMP_CRON = '*/5 * * * *';
 const ourPriceMap = (env, merchant) => memo(`ourprice:${merchant}`, 600e3, async () => {
   const rows = await catalogBlob(env.TOKENS, env.DB, merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;   // سعر المنافس يشمل الضريبة؛ فنقارن بسعرنا شاملاً الضريبة للمنتجات الخاضعة لها
@@ -638,10 +638,11 @@ async function compWeekly(env, merchant, now) {
   return added;
 }
 async function handleCompetitors(req, env) {
-  const merchant = await merchantFromEmbeddedToken(req, env);
+  const u = new URL(req.url), sub = u.pathname.slice('/api/competitors'.length);
+  // القراءة (GET) متاحة لرابط المشاركة (الإدارة تشاهد الروابط والمقارنات فقط)؛ الإضافة والبحث والفحص والتحقق والحذف بتوكن سلة فقط
+  const merchant = (await merchantFromEmbeddedToken(req, env)) || (req.method === 'GET' && !sub ? (await shareFromRequest(req, env))?.merchant : null);
   if (!merchant) return json({ error: 'unauthorized' }, 401);
   await ensureSchema(env.DB);
-  const u = new URL(req.url), sub = u.pathname.slice('/api/competitors'.length);
   if (req.method === 'GET' && !sub) {
     const [rows, ours] = await Promise.all([compList(env.DB, merchant), ourPriceMap(env, merchant)]);
     const items = rows.map((r) => { const our = ours.get(String(r.product).trim().toLowerCase()) ?? null; return { ...r, ourPrice: our, diffPct: our && r.price ? Math.round((our / r.price - 1) * 1000) / 10 : null }; });

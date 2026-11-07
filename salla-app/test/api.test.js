@@ -346,7 +346,13 @@ test('competitors API: add/check, our price (+VAT) vs competitor, ignore/delete,
   assert.equal((await (await get(env, '/api/competitors')).json()).items.some((x) => x.id === id), false);
   assert.equal((await worker.fetch(new Request('https://x.test/api/competitors'), env)).status, 401);
   const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
-  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors', { headers: { authorization: 'Share ' + c.id } }), env)).status, 401);   // رابط المشاركة لا يرى أسعار المنافسين
+  const sh = { authorization: 'Share ' + c.id };
+  const shGet = await worker.fetch(new Request('https://x.test/api/competitors', { headers: sh }), env);   // الإدارة (رابط المشاركة) تقرأ فقط
+  assert.equal(shGet.status, 200); assert.ok((await shGet.json()).items.length >= 1);
+  for (const [m, path, body] of [['POST', '', { lines: [{ product: 'Milk', competitor: 'Z', url: 'https://z.com/p' }] }], ['POST', '/check', { id: 1 }], ['POST', '/suggest', { product: 'Milk' }], ['POST', '/verify', { id: 1, on: true }], ['POST', '/ignore', { id: 1, ignored: true }], ['DELETE', '?id=1', null]]) {
+    assert.equal((await worker.fetch(new Request('https://x.test/api/competitors' + path, { method: m, body: body ? JSON.stringify(body) : undefined, headers: sh }), env)).status, 401, m + path);   // التعديل بتوكن سلة فقط
+  }
+  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors', { headers: { authorization: 'Share ' + '0'.repeat(32) } }), env)).status, 401);
   globalThis.fetch = prev;
 });
 
