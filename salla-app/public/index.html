@@ -1218,7 +1218,8 @@ async function jobCheck(){   // عند فتح التبويب: إن كانت هن
 }
 $('#compSuggest').addEventListener('click', async () => {
   if(!LIVE){ toast('البحث التلقائي متاح داخل سلة فقط'); return; }
-  try{ const j = await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:+$('#compSugN').value || 100, only:$('#compSugOnly').value})}); $('#compJobBar').textContent = jobText(j); jobRun(); }
+  try{ let restart = false; try{ const cur = await api('/api/competitors/job', {cache:'no-store'}); if(cur.running){ if(!confirm('توجد مهمة بحث جارية. هل تريد إيقافها وبدء بحث جديد بهذه الإعدادات؟')) return; restart = true; } }catch(e){ /* لا شيء */ }
+    const j = await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:+$('#compSugN').value || 100, only:$('#compSugOnly').value, restart})}); $('#compJobBar').textContent = jobText(j); jobRun(); }
   catch(err){ toast('تعذّر بدء البحث'); }
 });
 $('#compSubmit').addEventListener('click', async () => {

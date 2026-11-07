@@ -651,7 +651,7 @@ async function jobStep(env, merchant, batch) {
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
   let added = 0, missed = 0, errors = 0, found = 0, lastErr = ''; const st = { ex: 0, low: 0, rv: 0 };
   for (const name of take) {
-    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.5 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
+    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.35 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
   }
   job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr; job.sk = { ex: ((job.sk || {}).ex || 0) + st.ex, low: ((job.sk || {}).low || 0) + st.low, rv: ((job.sk || {}).rv || 0) + st.rv };
   await setMeta(env.DB, merchant, JOB, job);
