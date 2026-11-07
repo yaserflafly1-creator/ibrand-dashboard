@@ -651,7 +651,7 @@ async function jobStep(env, merchant, batch) {
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
   let added = 0, missed = 0, errors = 0, found = 0, lastErr = ''; const st = { ex: 0, low: 0, rv: 0 };
   for (const name of take) {
-    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.35 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
+    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, job.only ? null : rivals, job.only ? 0.25 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
   }
   job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr; job.sk = { ex: ((job.sk || {}).ex || 0) + st.ex, low: ((job.sk || {}).low || 0) + st.low, rv: ((job.sk || {}).rv || 0) + st.rv };
   await setMeta(env.DB, merchant, JOB, job);
@@ -679,9 +679,9 @@ async function handleCompetitors(req, env) {
   if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => ({}));
-  if (sub === '/clean') {   // تفحص المطابقات الاسمية غير المتحقق منها: ما تبيّن أنه يطابق منتجاً آخر عندنا أفضل، أو هبطت درجته تحت 50% بالقواعد الحالية (مثل نان ديو ≠ نان)، يُستبعد
+  if (sub === '/clean') {   // تفحص المطابقات الاسمية غير المتحقق منها: ما تبيّن أنه يطابق منتجاً آخر عندنا أفضل، أو هبطت درجته تحت 35% بالقواعد الحالية (مثل نان ديو ≠ نان)، يُستبعد
     const rv = await ownRivals(env, merchant); let n = 0;
-    for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && (rivalOf(r.product, r.title, rv) || matchScore(r.product, r.title) < 0.5)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
+    for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && (rivalOf(r.product, r.title, rv) || matchScore(r.product, r.title) < 0.35)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
     return json({ ignored: n });
   }
   if (sub === '/job') return json(jobView(b.restart ? (await setMeta(env.DB, merchant, JOB, null), await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))) : await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))));
