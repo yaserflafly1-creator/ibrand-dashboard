@@ -143,3 +143,9 @@ test('rivalOf: a competitor title that fits another of our products better is no
   assert.equal(rivalOf(ours[2], 'سيميلاك جولد حليب (3) داعم للنمو 1600 جم', idx), null);
   assert.equal(rivalOf(ours[3], 'سيميلاك جولد حليب (3) داعم للنمو 1600 جم', idx).name, ours[2]);   // سيميلاك جولد ≠ ماكس برو
 });
+
+test('matchScore: a product-line word (ديو) on their side only makes it a different product (NAN vs NAN Duo)', () => {
+  assert.ok(matchScore('نان حليب أطفال رقم (1) 800 جم', 'نان ديو 1 800 جم') < 0.5);
+  assert.ok(matchScore('نان حليب للأطفال ديو (1) 800 جم', 'نان ديو 1 800 جم') >= 0.85);
+  assert.ok(matchScore('نان حليب أطفال رقم (1) 800 جم', 'نان حليب 1 800 جم') >= 0.6);
+});

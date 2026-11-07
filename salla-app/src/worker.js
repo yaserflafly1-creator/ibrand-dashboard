@@ -669,9 +669,9 @@ async function handleCompetitors(req, env) {
   if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => ({}));
-  if (sub === '/clean') {   // تفحص المطابقات الاسمية غير المتحقق منها: ما تبيّن أنه يطابق منتجاً آخر عندنا أفضل يُستبعد
+  if (sub === '/clean') {   // تفحص المطابقات الاسمية غير المتحقق منها: ما تبيّن أنه يطابق منتجاً آخر عندنا أفضل، أو هبطت درجته تحت 50% بالقواعد الحالية (مثل نان ديو ≠ نان)، يُستبعد
     const rv = await ownRivals(env, merchant); let n = 0;
-    for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && rivalOf(r.product, r.title, rv)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
+    for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && (rivalOf(r.product, r.title, rv) || matchScore(r.product, r.title) < 0.5)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
     return json({ ignored: n });
   }
   if (sub === '/job') return json(jobView(b.restart ? (await setMeta(env.DB, merchant, JOB, null), await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))) : await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual', Date.now(), String(b.only || ''))));

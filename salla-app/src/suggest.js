@@ -12,7 +12,8 @@ export const tokens = (s) => normText(s).split(/\s+/).map((t) => UNIT[t] || stri
 // كلمات عامة (فئة/وحدة/تعبئة) وزنها قليل: العلامة والنوع هما ما يحسم المطابقة
 const GEN = new Set(['حليب', 'اطفال', 'طفل', 'رضع', 'رضيع', 'حفاضه', 'كريم', 'شامبو', 'غسول', 'سائل', 'جل', 'مرطب', 'بلسم', 'عبوه', 'علبه', 'صندوق', 'جامبو', 'بوكس', 'جم', 'مل', 'حبه', 'كجم', 'لتر', 'للبشره', 'للشعر', 'ml', 'gm', 'spf', 'كيلو', 'شهر', 'اشهر', 'عمر', 'للرضع', 'للاطفال', 'للصغار', 'رقم', 'حديث', 'جديد', 'كبير', 'جدا', 'صغير', 'متوسط', 'مضغوطه', 'مضغوط', 'ماسيه', 'حتى', 'الى', 'اصلي', 'الاصلي']);
 // كلمات تحدد نسخة المنتج (اكسترا/بلس/ماكس/جولد/فورت…): غيابها عند المرشّح يعني غالباً منتجاً آخر من نفس الخط
-const VARIANT = new Set(['اكسترا', 'extra', 'بلس', 'plus', 'ماكس', 'max', 'برو', 'pro', 'جولد', 'gold', 'فورت', 'forte', 'ادفانس', 'advance', 'سوبر', 'super', 'اولترا', 'ultra', 'حساس', 'ليت', 'light', 'زيرو', 'zero', 'بريميوم', 'premium', 'ميجا', 'mega']);
+const VARIANT = new Set(['اكسترا', 'extra', 'بلس', 'plus', 'ماكس', 'max', 'برو', 'pro', 'جولد', 'gold', 'فورت', 'forte', 'ادفانس', 'advance', 'سوبر', 'super', 'اولترا', 'ultra', 'حساس', 'ليت', 'light', 'زيرو', 'zero', 'بريميوم', 'premium', 'ميجا', 'mega', 'ديو', 'duo', 'سوبريم', 'supreme']);
+const LINE = new Set(['ديو', 'duo', 'سوبريم', 'supreme']);   // خط منتج مستقل: وجوده عندهم دون أن يكون عندنا يعني منتجاً آخر
 // حزمة/عرض (عرض، عبوتين، ×3): سعرها لعدة وحدات فلا تُقارن بسعر الوحدة
 const isBundle = (s) => /(^|\s)(عرض|عبوتين|باكج|حزمة|حزمه|offer|bundle)(\s|$)|[×x*]\s*[2-9](?!\d)|(?<!\d)[2-9]\s*[×x*](?!\d)/i.test(String(s));
 const isNum = (t) => /^\d+(\.\d+)?$/.test(t);
@@ -40,6 +41,7 @@ export function matchScore(ours, theirs) {
   let wHit = total ? words.filter(hit).reduce((x, t) => x + w(t), 0) / total : 1;
   if (brand && !hit(brand)) wHit *= 0.35;
   if (words.some((t) => VARIANT.has(t) && !hit(t))) wHit *= 0.6;
+  if (bl.some((t) => LINE.has(t) && !a.includes(t))) wHit *= 0.6;                  // نسخة عندهم ليست عندنا (نان ديو ≠ نان العادي)
   const nHit = nums.length ? nums.filter((t) => b.has(t)).length / nums.length : 1;
   let score = wHit * (0.15 + 0.85 * nHit * nHit);
   const mine = new Set(a), extra = bl.filter((t) => !isNum(t) && !GEN.has(t) && t.length >= 3 && !mine.has(t) && !words.some((x) => near(x, t)));
