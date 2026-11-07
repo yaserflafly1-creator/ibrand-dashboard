@@ -244,7 +244,7 @@ dialog::backdrop{background:rgba(42,26,36,.45);backdrop-filter:blur(2px)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .buy-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:12px}
-@media (max-width:640px){#aiKpis{grid-template-columns:1fr 1fr!important}#aiPanel table{min-width:0!important;width:100%}#aiPanel th,#aiPanel td{padding:10px 6px;font-size:.8rem}#careKpis{grid-template-columns:1fr 1fr!important}#carePanel table{min-width:0!important;width:100%}#carePanel th,#carePanel td{padding:10px 6px;font-size:.8rem}#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
+@media (max-width:640px){#compKpis{grid-template-columns:1fr 1fr!important}#compPanel table{min-width:0!important;width:100%}#compPanel th,#compPanel td{padding:10px 6px;font-size:.8rem}#compPanel .mh{display:none}#aiKpis{grid-template-columns:1fr 1fr!important}#aiPanel table{min-width:0!important;width:100%}#aiPanel th,#aiPanel td{padding:10px 6px;font-size:.8rem}#careKpis{grid-template-columns:1fr 1fr!important}#carePanel table{min-width:0!important;width:100%}#carePanel th,#carePanel td{padding:10px 6px;font-size:.8rem}#buyKpis{grid-template-columns:1fr 1fr!important}.buy-tools input{width:100%}#buyPanel th,#buyPanel td{padding:10px 6px;font-size:.8rem}#buyPanel table{min-width:0!important;width:100%}#buyPanel .mh{display:none}}
 /* تبويبات اللوحة: كل قسم يحمل data-tab؛ الأقسام الجديدة تُضاف بإعطائها data-tab فقط */
 .tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;margin:0 0 12px;position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg,#fdf2f8) 78%,transparent);scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -259,6 +259,7 @@ body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
 body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
 body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
 body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
+body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
 /* كمل احتياجك */
 .cx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .cx-boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
@@ -335,6 +336,7 @@ body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
   <nav class="tabs" id="tabs" role="tablist" aria-label="أقسام اللوحة">
     <button type="button" role="tab" data-t="overview" class="on">نظرة عامة</button>
     <button type="button" role="tab" data-t="products">المنتجات والتصنيفات</button>
+    <button type="button" role="tab" data-t="comp">المنافسون</button>
     <button type="button" role="tab" data-t="sales">العملاء والمبيعات</button>
     <button type="button" role="tab" data-t="cancel">الملغي</button>
     <button type="button" role="tab" data-t="ops">المخزون والشحن</button>
@@ -401,6 +403,23 @@ body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
     <p class="period-note" id="mthNote" style="margin:10px 0 0"></p>
   </section>
 
+
+  <section data-tab="comp" class="card panel sec" id="compPanel">
+    <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><button class="btn" id="compRefresh" type="button">تحديث</button></div>
+    <div class="mini-kpis" id="compKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="buy-tools">
+      <div class="seg" id="compMode" role="group" aria-label="التصفية"><button type="button" data-m="all" class="on">الكل</button><button type="button" data-m="exp">أنت أغلى</button><button type="button" data-m="chp">أنت أرخص</button><button type="button" data-m="err">أخطاء</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="compFilter" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="">كل المنافسين</option></select><input id="compSearch" type="search" placeholder="ابحث باسم المنتج…" autocomplete="off" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit;min-width:160px"></div>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr><th>المنتج</th><th>المنافس</th><th>سعرنا</th><th>سعرهم</th><th>الفرق</th><th>الحالة</th><th class="mh">آخر فحص</th><th></th></tr></thead><tbody id="compRows"></tbody></table></div>
+    <details style="margin-top:14px" id="compAdd"><summary style="cursor:pointer;font-weight:700">إضافة منتجات للمراقبة</summary>
+      <p class="period-note" style="margin:10px 0">سطر لكل منتج بالشكل: <b>اسم المنتج | المنافس | رابط صفحة المنتج عند المنافس</b>. اسم المنتج يجب أن يطابق اسمه في متجرك. يمكنك لصق أعمدة من جوجل شيت مباشرة. المنافسون المقترحون: النهدي، الدواء، المجتمع، اوت ليت العناية، صيدلية كوم، فارما براند، صيدلية المتحدة.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="compTplComp" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option>النهدي</option><option>الدواء</option><option>المجتمع</option><option>اوت ليت العناية</option><option>صيدلية كوم</option><option>فارما براند</option><option>صيدلية المتحدة</option></select><button class="btn" id="compTpl" type="button">املأ القالب بأعلى 20 منتجاً</button></div>
+      <textarea id="compLines" rows="6" dir="auto" placeholder="مثال:&#10;حليب نان 1 | النهدي | https://www.nahdionline.com/..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:12px;font:inherit"></textarea>
+      <button class="btn btn-primary" id="compSubmit" type="button" style="margin-top:8px">إضافة وفحص</button>
+    </details>
+    <p class="period-note" id="compNote" style="margin:10px 0 0"></p>
+  </section>
 
   <section data-tab="sales" class="grid-3 sec" aria-label="تحليل المبيعات">
     <div class="card panel"><div class="panel-h"><div><h2>طرق الدفع</h2><p>حصة كل وسيلة من المبيعات</p></div></div><ul class="bars" id="payBars"></ul></div>
@@ -1104,6 +1123,72 @@ function renderAi(){
   $('#aiNote').textContent = `آخر تحديث للتقرير: ${D.generated_at ? new Date(D.generated_at).toLocaleString('en-GB') : '—'}. أرقام مجمّعة فقط؛ لا تُعرض هنا أي نصوص محادثات.`;
 }
 
+/* ============ تحليل المنافسين (فحص مجاني من الخادم؛ داخل سلة فقط) ============ */
+let compData = null, compMode = 'all', compSeq = 0, compAt = 0;
+const COMP_NAMES = ['النهدي','الدواء','المجتمع','اوت ليت العناية','صيدلية كوم','فارما براند','صيدلية المتحدة'];
+function demoComp(){
+  const now = Date.now(), tops = (PRODUCTS||[]).slice(0,8), items = []; let id = 1;
+  tops.forEach((p,i) => COMP_NAMES.slice(0, 3+(i%3)).forEach((c,j) => { const our = Math.round(p.p*1.15*100)/100, price = Math.round(our*(0.86+((i*3+j*5)%9)*0.045)*100)/100;
+    items.push({id:id++, product:p.n, competitor:c, url:'https://example.com/p', price, currency:'SAR', avail:(i+j)%7===0 ? 0 : 1, title:p.n, checked:now-3600e3*(1+j), err:'', ignored:0, ourPrice:our, diffPct:Math.round((our/price-1)*1000)/10}); }));
+  items.push({id:id++, product:tops[0] ? tops[0].n : 'منتج', competitor:'اوت ليت العناية', url:'https://example.com/x', price:null, currency:'', avail:null, title:'', checked:now, err:'لا يوجد سعر منظّم في الصفحة', ignored:0, ourPrice:null, diffPct:null});
+  return {items};
+}
+async function loadComp(force){
+  if(!force && compData && Date.now()-compAt < 120e3) return;
+  const seq = ++compSeq;
+  try{ const d = LIVE ? await api('/api/competitors', {cache:'no-store'}) : demoComp(); if(seq !== compSeq) return; compData = d; compAt = Date.now(); }
+  catch(e){ if(seq !== compSeq) return; compData = null; $('#compNote').textContent = e.status===401 ? 'هذا التقرير متاح داخل سلة فقط.' : 'تعذّر تحميل بيانات المنافسين.'; }
+  renderComp();
+}
+function renderComp(){
+  if(!$('#compPanel') || !compData) return;
+  const all = compData.items, live = all.filter(x => !x.ignored);
+  const sel = $('#compFilter'), cur = sel.value, names = [...new Set(all.map(x => x.competitor))];
+  sel.innerHTML = '<option value="">كل المنافسين</option>' + names.map(n => `<option${n===cur?' selected':''}>${esc(n)}</option>`).join('');
+  const exp = live.filter(x => x.diffPct!=null && x.diffPct > 2).length, chp = live.filter(x => x.diffPct!=null && x.diffPct < -2).length, errs = live.filter(x => x.err).length;
+  $('#compKpis').innerHTML = [[fmt(new Set(live.map(x => x.product)).size), 'منتجات تحت المراقبة'], [fmt(exp), 'منتجات أنت أغلى فيها (>2%)'], [fmt(chp), 'منتجات أنت أرخص فيها (>2%)'], [fmt(errs), 'روابط فيها خطأ']].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
+  const q = ($('#compSearch').value||'').trim().toLowerCase(), cf = $('#compFilter').value;
+  let rows = all.filter(x => (!cf || x.competitor===cf) && (!q || x.product.toLowerCase().includes(q)) &&
+    (compMode==='all' || (compMode==='exp' && !x.ignored && x.diffPct!=null && x.diffPct>2) || (compMode==='chp' && !x.ignored && x.diffPct!=null && x.diffPct<-2) || (compMode==='err' && x.err)));
+  rows.sort((a,b) => (b.diffPct==null ? -1e9 : b.diffPct) - (a.diffPct==null ? -1e9 : a.diffPct));
+  $('#compRows').innerHTML = rows.length ? rows.map(x => {
+    const d = x.diffPct, dcell = d==null ? '—' : `<b style="color:${d>2?'#dc2626':d<-2?'#16a34a':'inherit'}">${d>0?'▲ +':d<0?'▼ ':''}${d.toFixed(1)}%</b>`;
+    const st = x.err ? `<span style="color:#dc2626;font-size:.78rem">${esc(x.err)}</span>` : x.avail===0 ? '<span style="color:#dc2626;font-weight:700">غير متوفر عندهم</span>' : x.avail===1 ? '<span style="color:#16a34a;font-weight:700">متوفر</span>' : '—';
+    return `<tr${x.ignored?' style="opacity:.45"':''}><td dir="auto">${esc(x.product)}${x.ourPrice==null ? '<br><small style="color:#dc2626">الاسم غير موجود في كتالوجنا</small>' : ''}</td><td>${esc(x.competitor)}</td><td>${x.ourPrice==null ? '—' : money(x.ourPrice)}</td><td>${x.price==null ? '—' : money(x.price)}</td><td>${x.ignored ? 'مستبعد' : dcell}</td><td>${st}</td><td class="mh">${x.checked ? ageText(x.checked) : 'لم يُفحص'}</td>
+      <td style="white-space:nowrap"><a class="linkbtn" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">فتح</a> · <button class="linkbtn" data-ck="${x.id}" type="button">فحص</button> · <button class="linkbtn" data-ig="${x.id}" data-on="${x.ignored?0:1}" type="button">${x.ignored?'إرجاع':'ليس نفس المنتج'}</button> · <button class="linkbtn" data-dl="${x.id}" type="button">حذف</button></td></tr>`; }).join('') : '<tr><td colspan="8" class="empty">لا توجد منتجات مراقَبة بعد. افتح «إضافة منتجات للمراقبة» أدناه.</td></tr>';
+  $('#compNote').textContent = 'سعرنا = السعر في سلة + 15% ضريبة للمنتجات الخاضعة لها. الفرق = سعرنا مقارنةً بسعرهم (موجب = نحن أغلى). الفحص يقرأ السعر المنظّم من صفحة المنتج؛ إن كان الموقع يحجب الجلب الآلي أو يعرض السعر بالجافاسكربت فقط يظهر خطأ في الحالة.';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-ck],[data-ig],[data-dl]'); if(!b || !b.closest('#compRows')) return;
+  try{
+    if(b.dataset.ck){ b.disabled = true; b.textContent = '…'; await api('/api/competitors/check', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:+b.dataset.ck})}); }
+    else if(b.dataset.ig){ await api('/api/competitors/ignore', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:+b.dataset.ig, ignored:b.dataset.on==='1'})}); }
+    else if(b.dataset.dl){ if(!confirm('حذف هذا الرابط من المراقبة؟')) return; await api('/api/competitors?id='+b.dataset.dl, {method:'DELETE'}); }
+  }catch(err){ toast('تعذّر تنفيذ العملية'); }
+  loadComp(true);
+});
+$('#compRefresh').addEventListener('click', () => loadComp(true));
+$('#compFilter').addEventListener('change', renderComp);
+$('#compSearch').addEventListener('input', renderComp);
+document.querySelectorAll('#compMode button').forEach(b => b.addEventListener('click', () => { compMode = b.dataset.m; document.querySelectorAll('#compMode button').forEach(x => x.classList.toggle('on', x===b)); renderComp(); }));
+$('#compTpl').addEventListener('click', () => {
+  const top = (state.view && state.view.cur && state.view.cur.top) || [], c = $('#compTplComp').value;
+  if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
+  $('#compLines').value = top.slice(0,20).map(p => `${p.name} | ${c} | `).join('\n');
+});
+$('#compSubmit').addEventListener('click', async () => {
+  const lines = $('#compLines').value.split('\n').map(l => l.split(/\s*[|\t]\s*/)).filter(a => a.length>=3 && a[2].trim()).map(a => ({product:a[0].trim(), competitor:a[1].trim(), url:a[2].trim()}));
+  if(!lines.length){ toast('لا توجد أسطر مكتملة (المنتج | المنافس | الرابط)'); return; }
+  if(!LIVE){ toast('الإضافة متاحة داخل سلة فقط'); return; }
+  const btn = $('#compSubmit'); btn.disabled = true; btn.textContent = 'جارٍ الإضافة…';
+  try{
+    const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines})});
+    const bad = r.rejected && r.rejected.length ? ` · مرفوض ${r.rejected.length}: ${r.rejected.slice(0,3).map(x => x.product+' ('+x.reason+')').join('، ')}` : '';
+    toast(`أُضيف ${r.added}${bad}`); if(r.added && !r.rejected.length) $('#compLines').value = '';
+  }catch(err){ toast('تعذّرت الإضافة'); }
+  btn.disabled = false; btn.textContent = 'إضافة وفحص'; loadComp(true);
+});
+
 /* ============ المشتريات: ما يبحث عنه الزوار ولا نملكه (من خدمة البحث عبر الخادم؛ السر لا يصل المتصفح أبداً) ============ */
 let buyData = null, buyErr = '', buyMode = 'missing', buyAt = 0, buySeq = 0;
 const BUY_MSG = {not_configured:'تقرير البحث غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
@@ -1161,12 +1246,13 @@ $('#buyExport').addEventListener('click', () => {
 });
 
 /* ============ تبويبات اللوحة ============ */
-const TABS = ['overview','products','sales','cancel','ops','care','buy','ai','cx'];
+const TABS = ['overview','products','comp','sales','cancel','ops','care','buy','ai','cx'];
 function setTab(t, keep){
   if(!TABS.includes(t)) t = 'overview';
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
+  if(t==='comp') setTimeout(() => loadComp(), 0);
   if(t==='buy') setTimeout(() => loadBuy(true), 0);   // كل فتح للتبويب يجلب من الخادم (الخادم يحتفظ بالرد دقيقة فقط)
   if(t==='ai') setTimeout(() => loadAi(true), 0);
   if(t==='care') setTimeout(() => { const v = state.view; if(v) loadCare(v.from, v.to); }, 0);
@@ -2025,7 +2111,7 @@ async function boot(){
     catch(e){ console.error('SDK init failed', e); }
   }
   if(SHARE){   // عرض للقراءة فقط: بلا أسماء عملاء/طلبات/كوبونات/شحن
-    ['cpnPanel','shpPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
+    ['cpnPanel','shpPanel','compPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.hidden = true; });
     const ob = document.getElementById('orders'); const op = ob && ob.closest('.card'); if(op) op.hidden = true;
     const ex = document.getElementById('export'); if(ex) ex.hidden = true;
     setPreset('month'); loadInventory(); scheduleAuto(); return;

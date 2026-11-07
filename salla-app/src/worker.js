@@ -1,6 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
+import { compList, compUpsert, compDelete, compIgnore, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
@@ -577,6 +578,60 @@ async function handleCustomers(req, env) {
   return json(body);
 }
 
+/* ---------- /api/competitors: مراقبة أسعار المنافسين (توكن سلة فقط؛ بيانات تجارية حساسة) ---------- */
+const COMP_PER_RUN = 15, COMP_CRON = '*/5 * * * *';
+const ourPriceMap = (env, merchant) => memo(`ourprice:${merchant}`, 600e3, async () => {
+  const rows = await catalogBlob(env.TOKENS, env.DB, merchant), vat = 1 + (Number(env.VAT_RATE) || 15) / 100;   // سعر المنافس يشمل الضريبة؛ فنقارن بسعرنا شاملاً الضريبة للمنتجات الخاضعة لها
+  return new Map(rows.map((r) => [String(r.name).trim().toLowerCase(), r.taxable !== 0 ? Math.round(r.price * vat * 100) / 100 : r.price]));
+});
+const startOfRiyadhDay = (now) => Date.parse(riyadhDay(now) + 'T00:00:00+03:00');
+async function checkComp(env, merchant, id, now = Date.now()) {
+  const row = await compOne(env.DB, merchant, id);
+  if (!row) return { err: 'غير موجود' };
+  const res = await checkCompetitorUrl(row.url);
+  await compSave(env.DB, merchant, id, res, now, riyadhDay(now));
+  return res;
+}
+async function handleCompetitors(req, env) {
+  const merchant = await merchantFromEmbeddedToken(req, env);
+  if (!merchant) return json({ error: 'unauthorized' }, 401);
+  await ensureSchema(env.DB);
+  const u = new URL(req.url), sub = u.pathname.slice('/api/competitors'.length);
+  if (req.method === 'GET' && !sub) {
+    const [rows, ours] = await Promise.all([compList(env.DB, merchant), ourPriceMap(env, merchant)]);
+    const items = rows.map((r) => { const our = ours.get(String(r.product).trim().toLowerCase()) ?? null; return { ...r, ourPrice: our, diffPct: our && r.price ? Math.round((our / r.price - 1) * 1000) / 10 : null }; });
+    return json({ items });
+  }
+  if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
+  if (req.method !== 'POST') return json({ error: 'not found' }, 404);
+  const b = await req.json().catch(() => ({}));
+  if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
+  if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
+  if (sub !== '') return json({ error: 'not found' }, 404);
+  const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 300), added = [], rejected = [];
+  for (const l of lines) {
+    const product = String(l?.product || '').trim().slice(0, 200), competitor = String(l?.competitor || '').trim().slice(0, 60), url = validCompetitorUrl(l?.url || '');
+    if (!product || !competitor) rejected.push({ product, reason: 'المنتج أو المنافس ناقص' });
+    else if (!url) rejected.push({ product, reason: 'الرابط غير صالح (يجب أن يكون https لموقع المنافس)' });
+    else added.push({ id: await compUpsert(env.DB, merchant, { product, competitor, url }), product, competitor });
+  }
+  const results = [];
+  if (b.check !== false && added.length && added.length <= 5) for (const a of added) results.push({ id: a.id, ...(await checkComp(env, merchant, a.id)) });   // القليل نفحصه فوراً؛ والباقي يفحصه الجدول المجدول
+  return json({ added: added.length, rejected, results });
+}
+export async function compCron(env, now = Date.now()) {
+  const { keys } = await env.TOKENS.list({ prefix: 'merchant:' });
+  let n = 0;
+  for (const k of keys) {
+    const merchant = k.name.slice('merchant:'.length);
+    await ensureSchema(env.DB);
+    const due = await compDue(env.DB, merchant, startOfRiyadhDay(now), Number(env.COMP_PER_RUN) || COMP_PER_RUN);   // ما لم يُفحص اليوم بعد
+    await pool(due, 5, (d) => checkComp(env, merchant, d.id, now));
+    n += due.length;
+  }
+  return n;
+}
+
 /* ---------- Cron: المزامنة لكل تاجر مثبّت ---------- */
 export async function syncAll(env, now = Date.now()) {
   const { keys } = await env.TOKENS.list({ prefix: 'merchant:' });
@@ -603,6 +658,7 @@ export default {
       if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
       if (pathname === '/api/care-orders' && req.method === 'GET') return await handleCare(req, env);
       if (pathname === '/api/chat-stats' && req.method === 'GET') return await handleChatStats(req, env);
+      if (pathname.startsWith('/api/competitors')) return await handleCompetitors(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);
       if (pathname === '/api/inventory' && req.method === 'GET') return await handleInventory(req, env);
@@ -618,6 +674,7 @@ export default {
     return env.ASSETS.fetch(req);
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(syncAll(env, event.scheduledTime));
+    // جدولان منفصلان (تشغيلان مستقلان بميزانيتهما من النداءات الفرعية): المزامنة كل دقيقة، وفحص أسعار المنافسين كل 5 دقائق
+    ctx.waitUntil(event.cron === COMP_CRON ? compCron(env, event.scheduledTime) : syncAll(env, event.scheduledTime));
   }
 };

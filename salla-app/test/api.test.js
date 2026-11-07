@@ -311,3 +311,38 @@ test('chat-stats: numbers only from /report/chat via binding; key server-side; e
   const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
   assert.equal((await worker.fetch(new Request('https://x.test/api/chat-stats', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
 });
+
+test('competitors API: add/check, our price (+VAT) vs competitor, ignore/delete, auth, cron checks only what is due', async () => {
+  const { compCron } = await import('../src/worker.js');
+  const env = mkEnv();
+  const page = (price) => `<script type="application/ld+json">{"@type":"Product","name":"P","offers":{"price":${price},"availability":"https://schema.org/InStock"}}</script>`;
+  const comp = { 'https://a-pharm.com/p1': 50, 'https://b-pharm.com/p1': 200 };
+  const realFetch = mockFetch(good), prev = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { const u = String(url); if (comp[u]) return new Response(page(comp[u])); return prev(url, init); };
+  await ensureSchema(env.DB);
+  await env.DB.prepare('INSERT INTO catalog (merchant, name, price, img, cat, taxable) VALUES (?, ?, ?, ?, ?, ?)').bind('346539387', 'Milk', 100, '', '', 1).run();
+  const post = (path, body, hdr = auth.headers) => worker.fetch(new Request('https://x.test/api/competitors' + path, { method: 'POST', body: JSON.stringify(body), headers: hdr }), env);
+  const bad = await (await post('', { lines: [{ product: 'Milk', competitor: 'X', url: 'http://insecure.com/p' }, { product: '', competitor: 'X', url: 'https://a-pharm.com/p1' }] })).json();
+  assert.equal(bad.added, 0); assert.equal(bad.rejected.length, 2);
+  const r = await (await post('', { lines: [{ product: 'Milk', competitor: 'A-Pharm', url: 'https://a-pharm.com/p1' }] })).json();   // واحد: يُفحص فوراً
+  assert.equal(r.added, 1); assert.equal(r.results[0].price, 50);
+  const list = await (await get(env, '/api/competitors')).json();
+  assert.equal(list.items.length, 1); assert.equal(list.items[0].price, 50); assert.equal(list.items[0].ourPrice, 115);   // 100 + 15% ضريبة
+  assert.equal(list.items[0].diffPct, 130); assert.equal(list.items[0].avail, 1);
+  // عدة روابط: لا فحص فوري، والجدول المجدول يفحصها
+  const many = await (await post('', { lines: Array.from({ length: 6 }, (_, i) => ({ product: 'Milk', competitor: 'B' + i, url: 'https://b-pharm.com/p1' })) })).json();
+  assert.equal(many.added, 6); assert.deepEqual(many.results, []);
+  const n = await compCron(env, Date.now()); assert.equal(n, 6);   // الأول فُحص اليوم فلا يدخل
+  const after = (await (await get(env, '/api/competitors')).json()).items.filter((x) => x.competitor.startsWith('B'));
+  assert.ok(after.every((x) => x.price === 200 && !x.err));
+  assert.equal(await compCron(env, Date.now()), 0);                 // لا شيء مستحق بعد الفحص
+  const id = after[0].id;
+  await post('/ignore', { id, ignored: true }); assert.equal((await (await get(env, '/api/competitors')).json()).items.find((x) => x.id === id).ignored, 1);
+  const chk = await (await post('/check', { id: list.items[0].id })).json(); assert.equal(chk.price, 50);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors?id=' + id, { method: 'DELETE', ...auth }), env)).status, 200);
+  assert.equal((await (await get(env, '/api/competitors')).json()).items.some((x) => x.id === id), false);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors'), env)).status, 401);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
+  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors', { headers: { authorization: 'Share ' + c.id } }), env)).status, 401);   // رابط المشاركة لا يرى أسعار المنافسين
+  globalThis.fetch = prev;
+});

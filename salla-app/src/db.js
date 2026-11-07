@@ -4,6 +4,8 @@ const ready = new WeakSet();
 export async function ensureSchema(db) {
   if (ready.has(db)) return;
   await db.batch([
+    db.prepare('CREATE TABLE IF NOT EXISTS comp_item (merchant TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT, product TEXT NOT NULL, competitor TEXT NOT NULL, url TEXT NOT NULL, price REAL, currency TEXT, avail INTEGER, title TEXT, checked INTEGER NOT NULL DEFAULT 0, err TEXT NOT NULL DEFAULT \'\', ignored INTEGER NOT NULL DEFAULT 0, UNIQUE (merchant, product, competitor))'),
+    db.prepare('CREATE TABLE IF NOT EXISTS comp_hist (merchant TEXT NOT NULL, item_id INTEGER NOT NULL, day TEXT NOT NULL, price REAL, avail INTEGER, PRIMARY KEY (merchant, item_id, day))'),
     db.prepare('CREATE TABLE IF NOT EXISTS day_agg (merchant TEXT NOT NULL, day TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (merchant, day))'),
     db.prepare('CREATE TABLE IF NOT EXISTS meta (merchant TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY (merchant, k))'),
     db.prepare('CREATE TABLE IF NOT EXISTS inventory (merchant TEXT NOT NULL, id TEXT NOT NULL, gen INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (merchant, id))'),
