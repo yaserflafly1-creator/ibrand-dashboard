@@ -38,7 +38,7 @@ export function parseProductPage(html) {
       const price = toNum(o?.price ?? o?.lowPrice ?? o?.priceSpecification?.price);
       if (price) {
         const codes = [...new Set(['sku', 'gtin', 'gtin8', 'gtin12', 'gtin13', 'gtin14', 'mpn', 'productID'].flatMap((k) => [codeOf(n[k]), codeOf(o[k])]).filter(Boolean))];   // الباركود يرد غالباً في sku/gtin/mpn
-        found = { price, currency: String(o.priceCurrency || o.priceSpecification?.priceCurrency || '').slice(0, 5), avail: availOf(o.availability), title: decode(n.name).slice(0, 200), codes }; break;
+        found = { price, currency: String(o.priceCurrency || o.priceSpecification?.priceCurrency || '').slice(0, 5), avail: availOf(o.availability), title: decode(n.name).slice(0, 200), codes, brand: decode(typeof n.brand === 'string' ? n.brand : n.brand?.name).slice(0, 80) }; break;
       }
     }
   }

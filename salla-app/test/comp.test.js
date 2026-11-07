@@ -9,7 +9,7 @@ test('toNum: Arabic digits, thousands and decimal commas', () => {
 
 test('parseProductPage: JSON-LD Product (single, graph, offers array), availability, title', () => {
   const ld = (o) => `<html><head><script type="application/ld+json">${JSON.stringify(o)}</script></head></html>`;
-  assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'حليب &amp; نمو', offers: { '@type': 'Offer', price: '89.90', priceCurrency: 'SAR', availability: 'https://schema.org/InStock' } })), { price: 89.9, currency: 'SAR', avail: 1, title: 'حليب & نمو', codes: [] });
+  assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'حليب &amp; نمو', offers: { '@type': 'Offer', price: '89.90', priceCurrency: 'SAR', availability: 'https://schema.org/InStock' } })), { price: 89.9, currency: 'SAR', avail: 1, title: 'حليب & نمو', codes: [], brand: '' });
   const g = parseProductPage(ld({ '@graph': [{ '@type': 'WebSite' }, { '@type': ['Product'], name: 'X', offers: [{ price: 0 }, { price: 12, availability: 'OutOfStock' }] }] }));
   assert.equal(g.price, 12); assert.equal(g.avail, 0);
   assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'B', sku: '6281008298482', mpn: 'abc', gtin13: '6281008298482', offers: { price: 5 } })).codes, ['6281008298482']);   // الباركود من sku/gtin
@@ -39,7 +39,7 @@ test('checkCompetitorUrl: ok, HTTP errors, blocked, no price, network failure', 
   assert.equal((await checkCompetitorUrl('https://a.com/p', async () => { throw new Error('x'); })).err, 'تعذّر الجلب');
 });
 
-import { matchScore, tokens, suggestFor } from '../src/suggest.js';
+import { matchScore, tokens, suggestFor, brandSlugFor, learnBrand } from '../src/suggest.js';
 
 test('matchScore: Arabic normalisation, units, numbers must agree', () => {
   assert.equal(matchScore('سيميلاك جولد حليب الرضع (2) 800 جم', 'سيميلاك جولد حليب الرضع (2) 800 جم'), 1);
@@ -94,4 +94,30 @@ test('matchScore: rejects look-alikes from real review screenshots, accepts true
   assert.ok(matchScore('ابتاميل (1) 400 جم', 'ابتاميل إتش إيه (1) للرضع 400 جم') < 0.85);        // نسخة مختلفة (HA)
   assert.ok(matchScore('جونسون شامبو اطفال 750 مل', 'عرض جونسون شامبو أطفال 750 مل ×3') < 0.6);   // حزمة 3 وحدات
   for (const [a, b] of yes) assert.ok(matchScore(a, b) >= 0.75, `${a} <> ${b} = ${matchScore(a, b)}`);
+});
+
+test('suggestFor: learns bilingual brands from matched pages and uses them to find the product on English-slug sites (Nahdi)', async () => {
+  const prod = (title, price, brand) => `<html><script type="application/ld+json">{"@type":"Product","name":"${title}","brand":{"@type":"Brand","name":"${brand}"},"offers":{"price":${price}}}</script></html>`;
+  const kv = { m: new Map(), get: async (k) => kv.m.get(k) ?? null, put: async (k, v) => kv.m.set(k, v) };
+  const f = async (u) => {
+    u = String(u);
+    if (u === 'https://pharmabrand.sa/sitemap.xml') return new Response('<loc>https://pharmabrand.sa/ar/sitemap-1.xml</loc>');
+    if (u === 'https://pharmabrand.sa/ar/sitemap-1.xml') return new Response('<loc>https://pharmabrand.sa/ar/%D8%AD%D9%84%D9%8A%D8%A8-%D8%B3%D9%8A%D9%85%D9%8A%D9%84%D8%A7%D9%83-%D9%85%D8%A7%D9%83%D8%B3-%D8%A8%D8%B1%D9%88-2-820-%D8%AC%D8%B1%D8%A7%D9%85/p1</loc>');
+    if (u.startsWith('https://pharmabrand.sa/ar/')) return new Response(prod('حليب سيميلاك ماكس برو رقم 2 عبوة 820 جرام', 170, 'سيميلاك| SIMILAC'));
+    if (u === 'https://www.nahdionline.com/sitemap_index_ar.xml') return new Response('<loc>https://www.nahdionline.com/ar/sitemap1.xml</loc>');
+    if (u === 'https://www.nahdionline.com/ar/sitemap1.xml') return new Response('<loc>https://www.nahdionline.com/ar-sa/similac-gold-max-pro-stage-2-820-gm/pdp/111</loc><loc>https://www.nahdionline.com/ar-sa/similac-stage-3-820-gm/pdp/222</loc><loc>https://www.nahdionline.com/ar-sa/pampers-pants-4/pdp/333</loc>');
+    if (u.endsWith('/pdp/111')) return new Response(prod('سيميلاك حليب أطفال ماكس برو (2) 820 جم', 168, '277191'));
+    return new Response('', { status: 404 });
+  };
+  const name = 'سيميلاك حليب اطفال ماكس برو (2) 820 جم';
+  const r = await suggestFor(name, { info: {}, fetchFn: f, kv, sites: ['فارما براند', 'النهدي'] });   // بلا رابط إنجليزي من سلة
+  assert.ok(r.some((x) => x.competitor === 'فارما براند' && x.price === 170));
+  const nahdi = r.find((x) => x.competitor === 'النهدي'); assert.ok(nahdi && nahdi.price === 168 && nahdi.score >= 0.85);   // وُجدت بفضل العلامة المتعلَّمة similac
+  assert.equal(brandSlugFor({ 'سيميلاك': 'similac' }, name), 'similac-milk-2-820');
+});
+
+test('learnBrand: bilingual brand strings only', () => {
+  const d = {}; assert.equal(learnBrand(d, 'ابتاميل| APTAMIL'), true); assert.equal(learnBrand(d, 'شيا مويستشر - Shea Moisture'), true);
+  assert.equal(learnBrand(d, 'بامبرز'), false); assert.equal(learnBrand(d, '277191'), false); assert.equal(learnBrand(d, 'MIELLE'), false);
+  assert.deepEqual(d, { 'ابتاميل': 'aptamil', 'شيا مويستشر': 'shea moisture' });
 });
