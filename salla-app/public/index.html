@@ -407,6 +407,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
   <section data-tab="comp" class="card panel sec" id="compPanel">
     <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><button class="btn" id="compRefresh" type="button">تحديث</button></div>
     <div class="mini-kpis" id="compKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div id="compByComp" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px"></div>
     <div class="buy-tools">
       <div class="seg" id="compMode" role="group" aria-label="التصفية"><button type="button" data-m="all" class="on">الكل</button><button type="button" data-m="exp">أنت أغلى</button><button type="button" data-m="chp">أنت أرخص</button><button type="button" data-m="unv">غير متحقق منها</button><button type="button" data-m="err">أخطاء</button></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="compFilter" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="">كل المنافسين</option></select><input id="compSearch" type="search" placeholder="ابحث باسم المنتج…" autocomplete="off" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit;min-width:160px"></div>
@@ -1164,6 +1165,8 @@ function renderComp(){
   sel.innerHTML = '<option value="">كل المنافسين</option>' + names.map(n => `<option${n===cur?' selected':''}>${esc(n)}</option>`).join('');
   const exp = live.filter(x => x.diffPct!=null && x.diffPct > 2).length, chp = live.filter(x => x.diffPct!=null && x.diffPct < -2).length, errs = live.filter(x => x.err).length;
   $('#compKpis').innerHTML = [[fmt(new Set(live.map(x => x.product)).size), 'منتجات تحت المراقبة'], [fmt(exp), 'منتجات أنت أغلى فيها (>2%)'], [fmt(chp), 'منتجات أنت أرخص فيها (>2%)'], [fmt(live.filter(x => !x.verified).length), 'مطابقات لم تتحقق منها بعد']].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
+  const cnt = {}; live.forEach(x => { const c = cnt[x.competitor] || (cnt[x.competitor] = {n:0, v:0}); c.n++; if(x.verified) c.v++; });
+  $('#compByComp').innerHTML = Object.entries(cnt).sort((a,b) => b[1].n-a[1].n).map(([k,c]) => `<button type="button" class="btn" data-cc="${esc(k)}" title="اضغط لتصفية هذا المنافس">${esc(k)}: <b>${fmt(c.n)}</b> منتج${c.v ? ` · متحقق ${fmt(c.v)}` : ''}</button>`).join('');
   const q = ($('#compSearch').value||'').trim().toLowerCase(), cf = $('#compFilter').value;
   let rows = all.filter(x => (!cf || x.competitor===cf) && (!q || x.product.toLowerCase().includes(q)) &&
     (compMode==='all' || (compMode==='exp' && !x.ignored && x.diffPct!=null && x.diffPct>2) || (compMode==='chp' && !x.ignored && x.diffPct!=null && x.diffPct<-2) || (compMode==='unv' && !x.ignored && !x.verified) || (compMode==='err' && x.err)));
@@ -1187,6 +1190,7 @@ document.addEventListener('click', async e => {
 });
 $('#compRefresh').addEventListener('click', () => loadComp(true));
 $('#compFilter').addEventListener('change', renderComp);
+$('#compByComp').addEventListener('click', e => { const b = e.target.closest('[data-cc]'); if(!b) return; $('#compFilter').value = $('#compFilter').value===b.dataset.cc ? '' : b.dataset.cc; renderComp(); });
 $('#compSearch').addEventListener('input', renderComp);
 document.querySelectorAll('#compMode button').forEach(b => b.addEventListener('click', () => { compMode = b.dataset.m; document.querySelectorAll('#compMode button').forEach(x => x.classList.toggle('on', x===b)); renderComp(); }));
 $('#compTpl').addEventListener('click', () => {
