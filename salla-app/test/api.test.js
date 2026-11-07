@@ -391,3 +391,18 @@ test('competitors: suggest uses our barcode (sku) + English slug; weekly job add
   await post('/verify', { id: it.id, on: false }); items = (await (await get(env, '/api/competitors')).json()).items; assert.equal(items.find((x) => x.id === it.id).verified, 0);
   globalThis.fetch = prev;
 });
+
+test('competitors /clean: unverified name matches whose title fits another of our products better are ignored; barcode/verified ones stay', async () => {
+  const env = mkEnv(); mockFetch(good); await ensureSchema(env.DB);
+  const cat = async (name) => env.DB.prepare('INSERT INTO catalog (merchant, name, price, img, cat, taxable) VALUES (?, ?, ?, ?, ?, ?)').bind('346539387', name, 100, '', '', 1).run();
+  await cat('نان حليب أطفال رقم (1) 800 جم'); await cat('نان ديو حليب أطفال رقم (1) 800 جم');
+  const ins = (p, mb, ver) => env.DB.prepare("INSERT INTO comp_item (merchant, product, competitor, url, price, title, matchby, score, verified) VALUES ('346539387', ?, ?, 'https://n/p', 10, 'نان ديو 1 800 جم', ?, 0.79, ?)").bind(p, 'N' + mb + ver, mb, ver).run();
+  await ins('نان حليب أطفال رقم (1) 800 جم', 'name', 0);      // خاطئ
+  await ins('نان حليب أطفال رقم (1) 800 جم', 'name', 1);      // خاطئ لكنه متحقق منه يدوياً: لا يُمس
+  await ins('نان حليب أطفال رقم (1) 800 جم', 'barcode', 0);   // باركود: لا يُمس
+  await ins('نان ديو حليب أطفال رقم (1) 800 جم', 'name', 0);  // صحيح
+  const r = await (await worker.fetch(new Request('https://x.test/api/competitors/clean', { method: 'POST', body: '{}', ...auth }), env)).json();
+  assert.equal(r.ignored, 1);
+  const items = (await (await get(env, '/api/competitors')).json()).items;
+  assert.equal(items.filter((x) => x.ignored).length, 1); assert.ok(items.find((x) => x.ignored).product.startsWith('نان حليب') && items.find((x) => x.ignored).verified === 0 && items.find((x) => x.ignored).matchby === 'name');
+});

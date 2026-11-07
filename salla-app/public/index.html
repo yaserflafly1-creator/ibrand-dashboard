@@ -405,7 +405,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
 
 
   <section data-tab="comp" class="card panel sec" id="compPanel">
-    <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><button class="btn" id="compRefresh" type="button">تحديث</button></div>
+    <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="compClean" type="button" title="يستبعد المطابقات غير المتحقق منها التي تخص منتجاً آخر عندنا (مثل نان ≠ نان ديو)">فحص التعارضات</button><button class="btn" id="compRefresh" type="button">تحديث</button></div></div>
     <div class="mini-kpis" id="compKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div id="compByComp" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px"></div>
     <div class="buy-tools">
@@ -1159,7 +1159,7 @@ const matchCell = x => { const v = x.verified ? ' <span title="تم التحقق
   return x.matchby==='barcode' ? `<b style="color:#16a34a">باركود</b>${v}` : x.matchby==='name' ? `<b style="color:${x.score>=0.85?'#16a34a':'#d97706'}">اسم ${Math.round((x.score||0)*100)}%</b>${v}` : `<span style="color:var(--muted)">يدوي</span>${v}`; };
 function renderComp(){
   if(!$('#compPanel') || !compData) return;
-  if(SHARE){ const add = $('#compAdd'); if(add) add.hidden = true; }   // الإدارة (رابط المشاركة): قراءة فقط
+  if(SHARE){ const add = $('#compAdd'); if(add) add.hidden = true; const cl = $('#compClean'); if(cl) cl.hidden = true; }   // الإدارة (رابط المشاركة): قراءة فقط
   const all = compData.items, live = all.filter(x => !x.ignored);
   const sel = $('#compFilter'), cur = sel.value, names = [...new Set(all.map(x => x.competitor))];
   sel.innerHTML = '<option value="">كل المنافسين</option>' + names.map(n => `<option${n===cur?' selected':''}>${esc(n)}</option>`).join('');
@@ -1189,6 +1189,7 @@ document.addEventListener('click', async e => {
   loadComp(true);
 });
 $('#compRefresh').addEventListener('click', () => loadComp(true));
+$('#compClean').addEventListener('click', async () => { if(!LIVE){ toast('متاح داخل سلة فقط'); return; } try{ const r = await api('/api/competitors/clean', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}); toast(r.ignored ? `استُبعدت ${r.ignored} مطابقة تخص منتجاً آخر عندنا` : 'لا توجد مطابقات متعارضة'); }catch(err){ toast('تعذّر الفحص'); } loadComp(true); });
 $('#compFilter').addEventListener('change', renderComp);
 $('#compByComp').addEventListener('click', e => { const b = e.target.closest('[data-cc]'); if(!b) return; $('#compFilter').value = $('#compFilter').value===b.dataset.cc ? '' : b.dataset.cc; renderComp(); });
 $('#compSearch').addEventListener('input', renderComp);

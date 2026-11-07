@@ -206,3 +206,22 @@ export async function suggestFor(name, { info = {}, fetchFn = fetch, kv = null, 
   }
   return out.sort((a, b) => b.score - a.score);
 }
+
+/* منتجات متشابهة عندنا (نان ≠ نان ديو، سيميلاك جولد ≠ ماكس برو): إن كان عنوان صفحة المنافس يطابق منتجاً آخر عندنا أفضل من منتجنا الحالي فهو ليس له */
+const distinct = (t) => !isNum(t) && !GEN.has(t) && t.length >= 3;
+export function makeRivalIndex(names) {
+  const idx = new Map();
+  for (const n of uniq(names)) for (const t of uniq(tokens(n).filter(distinct))) { const a = idx.get(t) || []; a.push(n); idx.set(t, a); }
+  return idx;
+}
+export function rivalOf(ourName, title, idx) {
+  const mine = normText(ourName), base = matchScore(ourName, title), cands = new Set();
+  for (const t of uniq(tokens(title).filter(distinct))) for (const n of (idx.get(t) || []).slice(0, 300)) cands.add(n);
+  let best = null;
+  for (const n of cands) {
+    if (normText(n) === mine) continue;
+    const sc = matchScore(n, title);
+    if (sc >= 0.6 && sc > base + 0.03 && (!best || sc > best.score)) best = { name: n, score: sc };
+  }
+  return best;
+}

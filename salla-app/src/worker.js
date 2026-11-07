@@ -1,7 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, setMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
-import { suggestFor, matchScore, normText } from './suggest.js';
+import { suggestFor, matchScore, normText, makeRivalIndex, rivalOf } from './suggest.js';
 import { compList, compUpsert, compDelete, compIgnore, compVerify, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
@@ -607,9 +607,9 @@ async function ourInfo(get, name) {
 }
 const COMP_TOP = 100, COMP_KEEP = 0.6;
 // أفضل مرشّح لكل منافس يُضاف للمراقبة: الباركود (مُتحقَّق منه تلقائياً) أو الاسم من 60% (غير متحقق منه وتظهر نسبته ليراجعه المستخدم)
-async function addSuggestions(env, merchant, product, suggestions, existing) {
+async function addSuggestions(env, merchant, product, suggestions, existing, rivals = null) {
   const best = new Map();
-  for (const x of suggestions) if ((x.matchby === 'barcode' || x.score >= COMP_KEEP) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
+  for (const x of suggestions) if ((x.matchby === 'barcode' || (x.score >= COMP_KEEP && !(rivals && rivalOf(product, x.title, rivals)))) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
   let n = 0;
   for (const x of best.values()) {
     const id = await compUpsert(env.DB, merchant, { product, competitor: x.competitor, url: x.url, matchby: x.matchby, score: x.score, verified: x.matchby === 'barcode' ? 1 : 0, code: x.code || '' });
@@ -619,6 +619,7 @@ async function addSuggestions(env, merchant, product, suggestions, existing) {
   return n;
 }
 /* مهمة البحث عن المنافسين تعمل على الخادم (meta comp_job): تستمر ولو أغلق المستخدم الصفحة، ويدفعها الجدول المجدول كل 5 دقائق والمتصفح (إن كان مفتوحاً) بدفعات */
+const ownRivals = async (env, merchant) => makeRivalIndex((await catalogBlob(env.TOKENS, env.DB, merchant)).map((r) => r.name));   // أسماء منتجاتنا لاكتشاف المتشابهات
 const JOB = 'comp_job';
 const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
 async function startJob(env, merchant, n, mode, now = Date.now()) {
@@ -637,10 +638,10 @@ async function jobStep(env, merchant, batch) {
   job.idx += take.length; if (job.idx >= job.queue.length) job.done = true;
   await setMeta(env.DB, merchant, JOB, job);                                           // نحجز الدفعة قبل معالجتها كي لا يكررها تشغيل آخر
   const tokens = await loadTokens(env, merchant); if (!tokens) return job;
-  const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor));
+  const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
   let added = 0, missed = 0;
   for (const name of take) {
-    try { const n = await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS }), existing); added += n; if (!n) missed++; } catch (e) { missed++; }
+    try { const n = await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS }), existing, rivals); added += n; if (!n) missed++; } catch (e) { missed++; }
   }
   job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed;
   await setMeta(env.DB, merchant, JOB, job);
@@ -668,6 +669,11 @@ async function handleCompetitors(req, env) {
   if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => ({}));
+  if (sub === '/clean') {   // تفحص المطابقات الاسمية غير المتحقق منها: ما تبيّن أنه يطابق منتجاً آخر عندنا أفضل يُستبعد
+    const rv = await ownRivals(env, merchant); let n = 0;
+    for (const r of await compList(env.DB, merchant)) if (!r.ignored && !r.verified && r.matchby !== 'barcode' && r.title && rivalOf(r.product, r.title, rv)) { await compIgnore(env.DB, merchant, r.id, true); n++; }
+    return json({ ignored: n });
+  }
   if (sub === '/job') return json(jobView(b.restart ? (await setMeta(env.DB, merchant, JOB, null), await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual')) : await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual')));
   if (sub === '/job/step') return json(jobView(await jobStep(env, merchant, 3)));
   if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
@@ -676,7 +682,8 @@ async function handleCompetitors(req, env) {
   if (sub === '/suggest') {   // مرشّحون من مواقع المنافسين (بالباركود ثم الاسم)
     const name = String(b.product || '').trim().slice(0, 200), tokens = await loadTokens(env, merchant);
     const info = name && tokens ? await ourInfo(makeClient(env, merchant, tokens), name) : {};
-    return json({ suggestions: name ? await suggestFor(name, { info, kv: env.TOKENS }) : [], barcode: info.barcode || '' });
+    const rv = await ownRivals(env, merchant), sg = name ? await suggestFor(name, { info, kv: env.TOKENS }) : [];
+    return json({ suggestions: sg.filter((x) => x.matchby === 'barcode' || !rivalOf(name, x.title, rv)), barcode: info.barcode || '' });
   }
   if (sub !== '') return json({ error: 'not found' }, 404);
   const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 300), added = [], rejected = [];

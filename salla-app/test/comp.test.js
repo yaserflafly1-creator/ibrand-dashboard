@@ -133,3 +133,13 @@ test('learnBrand: bilingual brand strings only', () => {
   assert.equal(learnBrand(d, 'بامبرز'), false); assert.equal(learnBrand(d, '277191'), false); assert.equal(learnBrand(d, 'MIELLE'), false);
   assert.deepEqual(d, { 'ابتاميل': 'aptamil', 'شيا مويستشر': 'shea moisture' });
 });
+
+import { makeRivalIndex, rivalOf } from '../src/suggest.js';
+test('rivalOf: a competitor title that fits another of our products better is not ours (NAN vs NAN Duo)', () => {
+  const ours = ['نان حليب أطفال رقم (1) 800 جم', 'نان ديو حليب أطفال رقم (1) 800 جم', 'سيميلاك جولد حليب (3) داعم للنمو 1600 جم', 'سيميلاك حليب اطفال ماكس برو (3) 1600 جم'];
+  const idx = makeRivalIndex(ours);
+  assert.equal(rivalOf(ours[0], 'نان ديو 1 800 جم', idx).name, ours[1]);                       // هذا عنوان نان ديو
+  assert.equal(rivalOf(ours[1], 'نان ديو 1 800 جم', idx), null);                                // وهو لمنتجنا الصحيح
+  assert.equal(rivalOf(ours[2], 'سيميلاك جولد حليب (3) داعم للنمو 1600 جم', idx), null);
+  assert.equal(rivalOf(ours[3], 'سيميلاك جولد حليب (3) داعم للنمو 1600 جم', idx).name, ours[2]);   // سيميلاك جولد ≠ ماكس برو
+});
