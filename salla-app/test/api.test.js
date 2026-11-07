@@ -376,12 +376,18 @@ test('competitors: suggest uses our barcode (sku) + English slug; weekly job add
   const post = (path, body) => worker.fetch(new Request('https://x.test/api/competitors' + path, { method: 'POST', body: JSON.stringify(body), headers: auth.headers }), env);
   const sg = await (await post('/suggest', { product: 'بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة' })).json();
   assert.equal(sg.barcode, code); assert.equal(sg.suggestions[0].competitor, 'صيدلية كوم'); assert.equal(sg.suggestions[0].matchby, 'barcode'); assert.equal(sg.suggestions[0].score, 1);
-  await compCron(env, Date.now());                                    // أول تشغيل: يبني قائمة الأعلى مبيعاً ويعالج منتجين
+  await compCron(env, Date.now());                                    // أول تشغيل: يبدأ المهمة الأسبوعية ويعالج دفعة (كل المنتجات الثلاثة)
   let items = (await (await get(env, '/api/competitors')).json()).items;
   const it = items.find((x) => x.competitor === 'صيدلية كوم'); assert.ok(it); assert.equal(it.matchby, 'barcode'); assert.equal(it.verified, 1); assert.equal(it.price, 95.72); assert.equal(it.code, code);
-  const st = await (await import('../src/db.js')).getMeta(env.DB, '346539387', 'comp_weekly', null); assert.equal(st.idx, 2); assert.equal(st.queue.length, 3);
-  await compCron(env, Date.now()); const st2 = await (await import('../src/db.js')).getMeta(env.DB, '346539387', 'comp_weekly', null); assert.equal(st2.idx, 3);   // المنتج الثالث
+  const { getMeta } = await import('../src/db.js');
+  const job = await getMeta(env.DB, '346539387', 'comp_job', null); assert.equal(job.idx, 3); assert.equal(job.queue.length, 3); assert.equal(job.done, true); assert.equal(job.mode, 'weekly'); assert.equal(job.added, 1);
   const before = salla; await compCron(env, Date.now()); assert.equal(salla, before);       // لا بحث جديد قبل مرور أسبوع
+  // مهمة يدوية من المتصفح: تُبدأ، وتُدفع بدفعات، وتستمر على الخادم
+  const st0 = await (await post('/job', { n: 2 })).json(); assert.equal(st0.running, true); assert.equal(st0.total, 2); assert.equal(st0.idx, 0);
+  assert.equal((await (await post('/job', { n: 50 })).json()).total, 2);                      // مهمة جارية: لا تُستبدل
+  const st1 = await (await post('/job/step', {})).json(); assert.equal(st1.running, false); assert.equal(st1.idx, 2);
+  const gj = await (await get(env, '/api/competitors/job')).json(); assert.equal(gj.running, false); assert.equal(gj.total, 2);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/competitors/job', { headers: { authorization: 'Share ' + '0'.repeat(32) } }), env)).status, 401);
   await post('/verify', { id: it.id, on: false }); items = (await (await get(env, '/api/competitors')).json()).items; assert.equal(items.find((x) => x.id === it.id).verified, 0);
   globalThis.fetch = prev;
 });

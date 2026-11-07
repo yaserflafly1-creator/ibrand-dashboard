@@ -605,11 +605,11 @@ async function ourInfo(get, name) {
     return { barcode: code, slug };
   } catch (e) { return {}; }
 }
-const COMP_TOP = 100, COMP_SURE = 0.85;
-// أفضل مرشّح لكل منافس يُضاف للمراقبة: مطابقة بالباركود (مُتحقَّق منها تلقائياً) أو بالاسم بدرجة عالية
+const COMP_TOP = 100, COMP_KEEP = 0.6;
+// أفضل مرشّح لكل منافس يُضاف للمراقبة: الباركود (مُتحقَّق منه تلقائياً) أو الاسم من 60% (غير متحقق منه وتظهر نسبته ليراجعه المستخدم)
 async function addSuggestions(env, merchant, product, suggestions, existing) {
   const best = new Map();
-  for (const x of suggestions) if ((x.matchby === 'barcode' || x.score >= COMP_SURE) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
+  for (const x of suggestions) if ((x.matchby === 'barcode' || x.score >= COMP_KEEP) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
   let n = 0;
   for (const x of best.values()) {
     const id = await compUpsert(env.DB, merchant, { product, competitor: x.competitor, url: x.url, matchby: x.matchby, score: x.score, verified: x.matchby === 'barcode' ? 1 : 0, code: x.code || '' });
@@ -618,24 +618,40 @@ async function addSuggestions(env, merchant, product, suggestions, existing) {
   }
   return n;
 }
-// بحث أسبوعي تلقائي لأعلى المنتجات مبيعاً: كل تشغيل يعالج منتجين حتى تنتهي القائمة
-async function compWeekly(env, merchant, now) {
-  const st = await getMeta(env.DB, merchant, 'comp_weekly', { start: 0, queue: [], idx: 0 });
-  if (!st.queue.length || st.idx >= st.queue.length) {
-    if (now - st.start < 7 * 864e5) return 0;
-    const today = riyadhDay(now), rows = await rangeRows(env.DB, merchant, addDays(today, -30), today);
-    st.queue = sumDays(rows, true, null).products.slice(0, Number(env.COMP_TOP) || COMP_TOP).map((p) => p.name); st.idx = 0; st.start = now;
-    if (!st.queue.length) { await setMeta(env.DB, merchant, 'comp_weekly', st); return 0; }
-  }
-  const tokens = await loadTokens(env, merchant); if (!tokens) return 0;
+/* مهمة البحث عن المنافسين تعمل على الخادم (meta comp_job): تستمر ولو أغلق المستخدم الصفحة، ويدفعها الجدول المجدول كل 5 دقائق والمتصفح (إن كان مفتوحاً) بدفعات */
+const JOB = 'comp_job';
+const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
+async function startJob(env, merchant, n, mode, now = Date.now()) {
+  const cur = await getMeta(env.DB, merchant, JOB, null);
+  if (cur && !cur.done) return cur;                                                   // مهمة جارية: لا نبدأ ثانية
+  const today = riyadhDay(now), rows = await rangeRows(env.DB, merchant, addDays(today, -30), today);
+  const queue = sumDays(rows, true, null).products.slice(0, Math.min(500, Math.max(1, n))).map((p) => p.name);
+  const job = { queue, idx: 0, added: 0, missed: 0, mode, started: now, done: !queue.length };
+  await setMeta(env.DB, merchant, JOB, job);
+  return job;
+}
+async function jobStep(env, merchant, batch) {
+  let job = await getMeta(env.DB, merchant, JOB, null);
+  if (!job || job.done) return job;
+  const take = job.queue.slice(job.idx, job.idx + batch);
+  job.idx += take.length; if (job.idx >= job.queue.length) job.done = true;
+  await setMeta(env.DB, merchant, JOB, job);                                           // نحجز الدفعة قبل معالجتها كي لا يكررها تشغيل آخر
+  const tokens = await loadTokens(env, merchant); if (!tokens) return job;
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor));
-  let added = 0;
-  for (let i = 0; i < 2 && st.idx < st.queue.length; i++, st.idx++) {
-    const name = st.queue[st.idx];
-    try { added += await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS }), existing); } catch (e) { /* ننتقل للمنتج التالي */ }
+  let added = 0, missed = 0;
+  for (const name of take) {
+    try { const n = await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS }), existing); added += n; if (!n) missed++; } catch (e) { missed++; }
   }
-  await setMeta(env.DB, merchant, 'comp_weekly', st);
-  return added;
+  job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed;
+  await setMeta(env.DB, merchant, JOB, job);
+  return job;
+}
+// كل أسبوع تبدأ مهمة تلقائية لأعلى المنتجات مبيعاً؛ وكل تشغيل مجدول يعالج دفعة من أي مهمة جارية
+async function compWeekly(env, merchant, now) {
+  const at = await getMeta(env.DB, merchant, 'comp_weekly_at', 0), cur = await getMeta(env.DB, merchant, JOB, null);
+  if ((!cur || cur.done) && now - at >= 7 * 864e5) { await startJob(env, merchant, Number(env.COMP_TOP) || COMP_TOP, 'weekly', now); await setMeta(env.DB, merchant, 'comp_weekly_at', now); }
+  const j = await getMeta(env.DB, merchant, JOB, null);
+  if (j && !j.done) await jobStep(env, merchant, Number(env.COMP_BATCH) || 8);
 }
 async function handleCompetitors(req, env) {
   const u = new URL(req.url), sub = u.pathname.slice('/api/competitors'.length);
@@ -648,9 +664,12 @@ async function handleCompetitors(req, env) {
     const items = rows.map((r) => { const our = ours.get(String(r.product).trim().toLowerCase()) ?? null; return { ...r, ourPrice: our, diffPct: our && r.price ? Math.round((our / r.price - 1) * 1000) / 10 : null }; });
     return json({ items });
   }
+  if (req.method === 'GET' && sub === '/job') return json(jobView(await getMeta(env.DB, merchant, JOB, null)));
   if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => ({}));
+  if (sub === '/job') return json(jobView(b.restart ? (await setMeta(env.DB, merchant, JOB, null), await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual')) : await startJob(env, merchant, Number(b.n) || COMP_TOP, 'manual')));
+  if (sub === '/job/step') return json(jobView(await jobStep(env, merchant, 3)));
   if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));

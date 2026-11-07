@@ -416,10 +416,9 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
     <details style="margin-top:14px" id="compAdd" open><summary style="cursor:pointer;font-weight:700">إضافة منتجات للمراقبة</summary>
       <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
         <b>الطريقة 1 · كل المنافسين دفعة واحدة (الأسهل)</b>
-        <p class="period-note" style="margin:6px 0 8px">يبحث عن المنتجات الأكثر مبيعاً عندك في <b>كل المنافسين</b> بالباركود ثم بالاسم، <b>ويضيف تلقائياً</b> ما تطابق جيداً (باركود أو اسم 85% فأكثر). والأقل يعرضه لك لتراجعه أدناه. ويعيد النظام البحث <b>كل أسبوع</b> وحده لأعلى 100 منتج.</p>
+        <p class="period-note" style="margin:6px 0 8px">يبحث عن المنتجات الأكثر مبيعاً عندك في <b>كل المنافسين</b> بالباركود ثم بالاسم، <b>ويعمل على الخادم</b>: تقدر تخرج من الصفحة أو تغلقها ويكمل وحده (ويعيد البحث <b>كل أسبوع</b> لأعلى 100 منتج). الباركود يُضاف <b>«متحققاً»</b>، والاسم من 60% يُضاف <b>«غير متحقق»</b> وتظهر نسبته في عمود التطابق لتراجعه أنت (فلتر «غير متحقق منها»).</p>
         <select id="compSugN" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="20">أعلى 20 منتجاً</option><option value="50">أعلى 50 منتجاً</option><option value="100" selected>أعلى 100 منتج</option><option value="200">أعلى 200 منتج</option></select> <button class="btn btn-primary" id="compSuggest" type="button">ابحث وأضف تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
-        <div class="tbl-wrap" id="compSugWrap" hidden style="margin-top:10px"><table><thead><tr><th></th><th>منتجنا</th><th>المنافس</th><th>المنتج عندهم</th><th>سعرهم</th><th>التطابق</th></tr></thead><tbody id="compSugRows"></tbody></table></div>
-        <button class="btn btn-primary" id="compSugApply" type="button" hidden style="margin-top:8px">اعتماد المحدد</button>
+        <div id="compJobBar" class="period-note" style="margin:8px 0 0"></div>
       </div>
       <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
         <b>الطريقة 2 · منافس واحد بقائمة منتجات</b>
@@ -1199,44 +1198,27 @@ $('#compTpl').addEventListener('click', () => {
   if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
   $('#compLines').value = top.slice(0,20).map(p => `${p.name} | ${c} | `).join('\n');
 });
-let compSug = [];
-function renderSug(){
-  $('#compSugWrap').hidden = !compSug.length; $('#compSugApply').hidden = !compSug.length;
-  $('#compSugRows').innerHTML = compSug.map((x,i) => `<tr><td><input type="checkbox" data-sg="${i}"${x.on?' checked':''}></td><td dir="auto">${esc(x.product)}</td><td>${esc(x.competitor)}</td><td dir="auto"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||'فتح')}</a></td><td>${money(x.price)}</td><td>${x.matchby==='barcode' ? '<b style="color:#16a34a">باركود</b>' : `<b style="color:${x.score>=0.85?'#16a34a':x.score>=0.5?'#d97706':'#dc2626'}">اسم ${Math.round(x.score*100)}%</b>`}</td></tr>`).join('');
+let jobLoop = false;
+const jobText = j => j.running ? `البحث يعمل على الخادم: ${fmt(j.idx)}/${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة. يستمر في الخلفية حتى لو خرجت من الصفحة.` : (j.total ? `انتهى البحث: ${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة · ${fmt(j.missed)} منتجاً بلا مطابقة عند أي منافس.` : '');
+async function jobRun(){   // يدفع المهمة بدفعات صغيرة ما دامت الصفحة مفتوحة؛ وإن أُغلقت يكمل الجدول المجدول على الخادم
+  if(jobLoop || SHARE) return; jobLoop = true; const bar = $('#compJobBar'), btn = $('#compSuggest'); btn.disabled = true;
+  try{
+    for(let k = 0; ; k++){
+      const j = await api('/api/competitors/job/step', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'});
+      bar.textContent = jobText(j); if(k % 3 === 2) loadComp(true);
+      if(!j.running) break;
+    }
+  }catch(err){ bar.textContent += ' (انقطع الاتصال من المتصفح، لكن الخادم يواصل البحث وحده. حدّث الصفحة لمتابعة التقدم.)'; }
+  jobLoop = false; btn.disabled = false; loadComp(true);
 }
-document.addEventListener('change', e => { const c = e.target.closest('[data-sg]'); if(c) compSug[+c.dataset.sg].on = c.checked; });
+async function jobCheck(){   // عند فتح التبويب: إن كانت هناك مهمة جارية نعرض تقدمها ونكمل دفعها
+  if(!LIVE || SHARE || jobLoop) return;
+  try{ const j = await api('/api/competitors/job', {cache:'no-store'}); $('#compJobBar').textContent = jobText(j); if(j.running) jobRun(); }catch(err){ /* لا شيء */ }
+}
 $('#compSuggest').addEventListener('click', async () => {
-  if(!LIVE){ toast('الاقتراح التلقائي متاح داخل سلة فقط'); return; }
-  const top = ((state.view && state.view.cur && (state.view.cur.products || state.view.cur.top)) || []).slice(0, +$('#compSugN').value || 50).map(p => p.name);
-  if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
-  const btn = $('#compSuggest'); btn.disabled = true; compSug = []; renderSug();
-  const have = new Set(((compData && compData.items) || []).map(x => x.product+'|'+x.competitor));
-  let autoAdded = 0;
-  for(let i = 0; i < top.length; i++){
-    $('#compSuggestState').textContent = `جارٍ البحث… ${i+1}/${top.length}`;
-    try{
-      const r = await api('/api/competitors/suggest', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({product:top[i]})});
-      const best = {};   // أفضل مرشّح لكل منافس
-      (r.suggestions||[]).forEach(x => { if((x.matchby==='barcode' || x.score >= 0.5) && (!best[x.competitor] || x.score > best[x.competitor].score) && !have.has(top[i]+'|'+x.competitor)) best[x.competitor] = x; });
-      const found = Object.values(best), isSure = x => x.matchby==='barcode' || x.score >= 0.85, sure = found.filter(isSure), maybe = found.filter(x => !isSure(x));
-      if(sure.length){   // مطابقة قوية: تُضاف للمراقبة فوراً بسعرها المقروء، بلا انتظار اعتماد
-        try{ const a = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines:sure.map(x => ({product:top[i], competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title, matchby:x.matchby, score:x.score, code:x.code})), check:false})}); autoAdded += a.added || 0; sure.forEach(x => have.add(top[i]+'|'+x.competitor)); loadComp(true); }
-        catch(err){ sure.forEach(x => compSug.push({...x, product:top[i], on:true})); }
-      }
-      maybe.forEach(x => compSug.push({...x, product:top[i], on:false}));   // مطابقة ضعيفة: تنتظر مراجعتك
-      renderSug();
-    }catch(err){ /* نتابع للمنتج التالي */ }
-  }
-  $('#compSuggestState').textContent = `أُضيف تلقائياً للمراقبة: ${autoAdded} (باركود أو اسم 85%+).` + (compSug.length ? ` وتحتاج مراجعتك: ${compSug.length} (مطابقة أضعف، حدّد ما يصح ثم «اعتماد المحدد»).` : ' لا توجد اقتراحات أخرى تحتاج مراجعة.');
-  loadComp(true);
-  btn.disabled = false;
-});
-$('#compSugApply').addEventListener('click', async () => {
-  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title, matchby:x.matchby, score:x.score, code:x.code}));   // السعر مقروء للتو فيُحفظ فوراً
-  if(!lines.length){ toast('لم تحدد شيئاً'); return; }
-  try{ const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines, check:false})}); toast(`أُضيف ${r.added} للمراقبة`); compSug = compSug.filter(x => !x.on); renderSug(); }
-  catch(err){ toast('تعذّر الاعتماد'); }
-  loadComp(true);
+  if(!LIVE){ toast('البحث التلقائي متاح داخل سلة فقط'); return; }
+  try{ const j = await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:+$('#compSugN').value || 100})}); $('#compJobBar').textContent = jobText(j); jobRun(); }
+  catch(err){ toast('تعذّر بدء البحث'); }
 });
 $('#compSubmit').addEventListener('click', async () => {
   const raw = $('#compLines').value.split('\n').map(l => l.split(/\s*[|\t]\s*/)).filter(a => a.length >= 2 && a[0].trim() && a[1].trim());
@@ -1330,7 +1312,7 @@ function setTab(t, keep){
   document.body.dataset.tab = t;
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
   if(!keep){ try{ localStorage.setItem('tab', t); }catch(e){} history.replaceState(null, '', location.search + '#' + t); }
-  if(t==='comp') setTimeout(() => loadComp(), 0);
+  if(t==='comp') setTimeout(() => { loadComp(); jobCheck(); }, 0);
   if(t==='buy') setTimeout(() => loadBuy(true), 0);   // كل فتح للتبويب يجلب من الخادم (الخادم يحتفظ بالرد دقيقة فقط)
   if(t==='ai') setTimeout(() => loadAi(true), 0);
   if(t==='care') setTimeout(() => { const v = state.view; if(v) loadCare(v.from, v.to); }, 0);
