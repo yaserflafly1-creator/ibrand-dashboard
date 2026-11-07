@@ -417,7 +417,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="compTplComp" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option>النهدي</option><option>صيدلية المتحدة</option><option>فارما براند</option><option>صيدلية كوم</option><option>دار الأميرات</option><option>اوت ليت العناية</option><option>الدواء</option><option>المجتمع</option></select><button class="btn" id="compTpl" type="button">املأ القالب بأعلى 20 منتجاً</button></div>
       <div style="border:1px dashed var(--border);border-radius:12px;padding:12px;margin:0 0 12px">
         <b>اقتراح تلقائي</b>
-        <p class="period-note" style="margin:6px 0 8px">يبحث عن أعلى 20 منتجاً عندك في <b>صيدلية كوم وفارما براند ودار الأميرات</b> ويقترح الروابط لتؤكدها. (النهدي وصيدلية المتحدة واوت ليت العناية: أضف رابطها يدوياً.) المطابقة بالاسم، فراجع كل اقتراح قبل اعتماده.</p>
+        <p class="period-note" style="margin:6px 0 8px">يبحث عن أعلى 20 منتجاً عندك في <b>صيدلية كوم وفارما براند ودار الأميرات</b>. المطابقة القوية (75% فأكثر) <b>تُضاف للمراقبة تلقائياً</b> مع سعرها، والأضعف تعرضها لتراجعها. (النهدي وصيدلية المتحدة واوت ليت العناية: أضف رابطها يدوياً.) وإن أُضيف منتج خطأ فزر «ليس نفس المنتج» في الجدول يستبعده.</p>
         <button class="btn" id="compSuggest" type="button">ابحث تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
         <div class="tbl-wrap" id="compSugWrap" hidden style="margin-top:10px"><table><thead><tr><th></th><th>منتجنا</th><th>المنافس</th><th>المنتج عندهم</th><th>سعرهم</th><th>التطابق</th></tr></thead><tbody id="compSugRows"></tbody></table></div>
         <button class="btn btn-primary" id="compSugApply" type="button" hidden style="margin-top:8px">اعتماد المحدد</button>
@@ -1195,17 +1195,24 @@ $('#compSuggest').addEventListener('click', async () => {
   if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
   const btn = $('#compSuggest'); btn.disabled = true; compSug = []; renderSug();
   const have = new Set(((compData && compData.items) || []).map(x => x.product+'|'+x.competitor));
+  let autoAdded = 0;
   for(let i = 0; i < top.length; i++){
     $('#compSuggestState').textContent = `جارٍ البحث… ${i+1}/${top.length}`;
     try{
       const r = await api('/api/competitors/suggest', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({product:top[i]})});
       const best = {};   // أفضل مرشّح لكل منافس
       (r.suggestions||[]).forEach(x => { if(x.score >= 0.4 && (!best[x.competitor] || x.score > best[x.competitor].score) && !have.has(top[i]+'|'+x.competitor)) best[x.competitor] = x; });
-      Object.values(best).forEach(x => compSug.push({...x, product:top[i], on:x.score>=0.75}));
+      const found = Object.values(best), sure = found.filter(x => x.score >= 0.75), maybe = found.filter(x => x.score < 0.75);
+      if(sure.length){   // مطابقة قوية: تُضاف للمراقبة فوراً بسعرها المقروء، بلا انتظار اعتماد
+        try{ const a = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines:sure.map(x => ({product:top[i], competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title})), check:false})}); autoAdded += a.added || 0; sure.forEach(x => have.add(top[i]+'|'+x.competitor)); loadComp(true); }
+        catch(err){ sure.forEach(x => compSug.push({...x, product:top[i], on:true})); }
+      }
+      maybe.forEach(x => compSug.push({...x, product:top[i], on:false}));   // مطابقة ضعيفة: تنتظر مراجعتك
       renderSug();
     }catch(err){ /* نتابع للمنتج التالي */ }
   }
-  $('#compSuggestState').textContent = compSug.length ? `وُجد ${compSug.length} اقتراح؛ الخضراء (75%+) محدّدة مسبقاً، وراجع الباقي.` : 'لم أجد اقتراحات جديدة.';
+  $('#compSuggestState').textContent = `أُضيف تلقائياً للمراقبة: ${autoAdded} (مطابقة 75%+).` + (compSug.length ? ` وتحتاج مراجعتك: ${compSug.length} (مطابقة أضعف، حدّد ما يصح ثم «اعتماد المحدد»).` : ' لا توجد اقتراحات أخرى تحتاج مراجعة.');
+  loadComp(true);
   btn.disabled = false;
 });
 $('#compSugApply').addEventListener('click', async () => {
