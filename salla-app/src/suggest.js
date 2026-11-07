@@ -6,7 +6,11 @@ const AR = { 'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ى': 'ي', 'ة': 'ه', 'ؤ': '
 export const normText = (s) => String(s || '').toLowerCase().replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[ً-ٰٟـ]/g, '').replace(/[أإآىةؤئ]/g, (c) => AR[c]).replace(/[^\p{L}\p{N}.]+/gu, ' ').replace(/\.(?!\d)|(?<!\d)\./g, ' ').trim();
 const STOP = new Set(['من', 'في', 'مع', 'عبوه', 'عدد', 'حجم', 'مقاس', 'رقم', 'عرض', 'جديد', 'the', 'of', 'and', 'for', 'size', 'html']);
 const UNIT = { جرام: 'جم', جرامات: 'جم', غرام: 'جم', غ: 'جم', gm: 'جم', g: 'جم', gram: 'جم', مللتر: 'مل', ملل: 'مل', ml: 'مل', حفاضات: 'حفاضه', حفاض: 'حفاضه', حبه: 'حبه', حبات: 'حبه', قطعه: 'حبه', قطع: 'حبه', pieces: 'حبه', piece: 'حبه', pcs: 'حبه', diapers: 'حفاضه', diaper: 'حفاضه' };
-export const tokens = (s) => normText(s).split(/\s+/).map((t) => UNIT[t] || t).filter((t) => t && !STOP.has(t));
+export const tokens = (s) => normText(s).split(/\s+/).map((t) => UNIT[t] || (t.length > 4 && t.startsWith('ال') ? t.slice(2) : t)).filter((t) => t && !STOP.has(t));
+// كلمات عامة (فئة/وحدة/تعبئة) وزنها قليل: العلامة والنوع هما ما يحسم المطابقة
+const GEN = new Set(['حليب', 'اطفال', 'طفل', 'رضع', 'رضيع', 'حفاضه', 'كريم', 'شامبو', 'غسول', 'سائل', 'جل', 'مرطب', 'بلسم', 'عبوه', 'علبه', 'صندوق', 'جامبو', 'بوكس', 'جم', 'مل', 'حبه', 'كجم', 'لتر', 'للبشره', 'للشعر', 'ml', 'gm', 'spf', 'كيلو', 'شهر', 'اشهر', 'عمر', 'للرضع', 'للاطفال', 'للصغار', 'رقم', 'حديث', 'جديد', 'كبير', 'جدا', 'صغير', 'متوسط', 'مضغوطه', 'مضغوط', 'ماسيه', 'حتى', 'الى', 'اصلي', 'الاصلي']);
+// حزمة/عرض (عرض، عبوتين، ×3): سعرها لعدة وحدات فلا تُقارن بسعر الوحدة
+const isBundle = (s) => /(^|\s)(عرض|عبوتين|باكج|حزمة|حزمه|offer|bundle)(\s|$)|[×x*]\s*[2-9](?!\d)|(?<!\d)[2-9]\s*[×x*](?!\d)/i.test(String(s));
 const isNum = (t) => /^\d+(\.\d+)?$/.test(t);
 
 // فرق حرف واحد (استبدال/حذف/إضافة) بين كلمتين طويلتين: «بنادول» ≈ «بانادول»
@@ -18,15 +22,23 @@ const near = (a, b) => {
   const [s, l] = a.length < b.length ? [a, b] : [b, a];
   return s.slice(i) === l.slice(i + 1);
 };
-// 0..1: نسبة كلمات منتجنا الموجودة عند المرشّح، مع عقوبة إن اختلفت الأرقام (المقاس/العدد/الحجم)
+// 0..1: وزن كلماتنا الموجودة عند المرشّح. الكلمات العامة وزنها 0.3؛ وغياب كلمات العلامة/الاسم الأولى (أول كلمتين مميّزتين) يضرب الدرجة؛
+// والأرقام (المرحلة/المقاس/الحجم/العدد) إن لم تتطابق تهبط بها بقوة (800 جم ≠ 400 جم، مقاس 5 ≠ مقاس 3)
 export function matchScore(ours, theirs) {
   const a = tokens(ours), bl = tokens(theirs), b = new Set(bl);
   if (!a.length) return 0;
   const hit = (t) => b.has(t) || (!isNum(t) && bl.some((x) => near(t, x)));
-  const words = a.filter((t) => !isNum(t)), nums = a.filter(isNum);
-  const wHit = words.length ? words.filter(hit).length / words.length : 1;
+  const words = a.filter((t) => !isNum(t)), nums = a.filter(isNum), w = (t) => (GEN.has(t) ? 0.3 : 1);
+  const total = words.reduce((x, t) => x + w(t), 0);
+  let wHit = total ? words.filter(hit).reduce((x, t) => x + w(t), 0) / total : 1;
+  const keys = words.filter((t) => !GEN.has(t)).slice(0, 2);
+  if (keys.length && !keys.every(hit)) wHit *= keys.some(hit) ? 0.5 : 0.35;
   const nHit = nums.length ? nums.filter((t) => b.has(t)).length / nums.length : 1;
-  return Math.round(wHit * (0.4 + 0.6 * nHit) * 100) / 100;
+  let score = wHit * (0.15 + 0.85 * nHit * nHit);
+  const mine = new Set(a), extra = bl.filter((t) => !isNum(t) && !GEN.has(t) && t.length >= 3 && !mine.has(t) && !words.some((x) => near(x, t)));
+  score -= Math.min(0.3, 0.1 * new Set(extra).size);                                   // كلمات مميّزة عندهم ليست عندنا (نسخة/نوع مختلف)
+  if (isBundle(theirs) && !isBundle(ours)) score *= 0.5;
+  return Math.max(0, Math.round(score * 100) / 100);
 }
 
 const UA = 'Mozilla/5.0 (compatible; iBrandPriceCheck/1.0)';
@@ -89,7 +101,7 @@ export async function suggestFor(name, { info = {}, fetchFn = fetch, kv = null, 
     try { urls = SEARCH[site] ? await SEARCH[site](name, { ...info, barcode }, fetchFn) : MAPS[site] ? await byMap(site)(name, info, fetchFn, kv) : []; } catch (e) { return []; }
     // رتّب المرشّحين بتشابه الرابط مع اسمنا (أو رابطنا الإنجليزي) ثم اجلب أفضل 4
     const slug = info.slug ? info.slug.replace(/-/g, ' ') : '';
-    urls = urls.map((u) => ({ u, s: Math.max(matchScore(name, slugText(u)), slug ? matchScore(slug, slugText(u)) : 0) })).sort((a, b) => b.s - a.s).slice(0, 4).map((x) => x.u);
+    urls = urls.map((u) => ({ u, s: Math.max(matchScore(name, slugText(u)), slug ? matchScore(slug, slugText(u)) : 0) })).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.u);
     const checked = await Promise.all(urls.map(async (u) => { const fu = MAPS[site]?.toAr ? u.replace('/en/', '/ar/') : u; let r = await checkCompetitorUrl(fu, fetchFn); if (!r.ok && fu !== u) r = await checkCompetitorUrl(u, fetchFn); return { u: fu, r }; }));
     return checked.filter((x) => x.r.ok).map((x) => {
       const codes = x.r.codes || [], codeHit = barcode && codes.includes(barcode);

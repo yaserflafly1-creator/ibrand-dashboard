@@ -605,7 +605,7 @@ async function ourInfo(get, name) {
     return { barcode: code, slug };
   } catch (e) { return {}; }
 }
-const COMP_TOP = 50, COMP_SURE = 0.75;
+const COMP_TOP = 50, COMP_SURE = 0.85;
 // أفضل مرشّح لكل منافس يُضاف للمراقبة: مطابقة بالباركود (مُتحقَّق منها تلقائياً) أو بالاسم بدرجة عالية
 async function addSuggestions(env, merchant, product, suggestions, existing) {
   const best = new Map();
