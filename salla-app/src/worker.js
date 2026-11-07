@@ -607,8 +607,13 @@ async function ourInfo(get, name) {
 }
 const COMP_TOP = 100, COMP_KEEP = 0.6;
 // أفضل مرشّح لكل منافس يُضاف للمراقبة: الباركود (مُتحقَّق منه تلقائياً) أو الاسم من 60% (غير متحقق منه وتظهر نسبته ليراجعه المستخدم)
-async function addSuggestions(env, merchant, product, suggestions, existing, rivals = null, keep = COMP_KEEP) {
+async function addSuggestions(env, merchant, product, suggestions, existing, rivals = null, keep = COMP_KEEP, stats = null) {
   const best = new Map();
+  if (stats) for (const x of suggestions) {                                           // سبب رفض كل مرشّح (للتشخيص في شريط التقدّم)
+    if (existing.has(product + '|' + x.competitor)) stats.ex++;
+    else if (x.matchby !== 'barcode' && x.score < keep) stats.low++;
+    else if (x.matchby !== 'barcode' && rivals && rivalOf(product, x.title, rivals)) stats.rv++;
+  }
   for (const x of suggestions) if ((x.matchby === 'barcode' || (x.score >= keep && !(rivals && rivalOf(product, x.title, rivals)))) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
   let n = 0;
   for (const x of best.values()) {
@@ -621,7 +626,7 @@ async function addSuggestions(env, merchant, product, suggestions, existing, riv
 /* مهمة البحث عن المنافسين تعمل على الخادم (meta comp_job): تستمر ولو أغلق المستخدم الصفحة، ويدفعها الجدول المجدول كل 5 دقائق والمتصفح (إن كان مفتوحاً) بدفعات */
 const ownRivals = async (env, merchant) => makeRivalIndex((await catalogBlob(env.TOKENS, env.DB, merchant)).map((r) => r.name));   // أسماء منتجاتنا لاكتشاف المتشابهات
 const JOB = 'comp_job';
-const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, only: j.only || '', errors: j.errors || 0, lastErr: j.lastErr || '', found: j.found || 0, started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
+const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, only: j.only || '', errors: j.errors || 0, lastErr: j.lastErr || '', found: j.found || 0, sk: j.sk || null, started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
 async function startJob(env, merchant, n, mode, now = Date.now(), only = '') {
   const cur = await getMeta(env.DB, merchant, JOB, null);
   if (cur && !cur.done) return cur;                                                   // مهمة جارية: لا نبدأ ثانية
@@ -644,11 +649,11 @@ async function jobStep(env, merchant, batch) {
   await setMeta(env.DB, merchant, JOB, job);                                           // نحجز الدفعة قبل معالجتها كي لا يكررها تشغيل آخر
   const tokens = await loadTokens(env, merchant); if (!tokens) return job;
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
-  let added = 0, missed = 0, errors = 0, found = 0, lastErr = '';
+  let added = 0, missed = 0, errors = 0, found = 0, lastErr = ''; const st = { ex: 0, low: 0, rv: 0 };
   for (const name of take) {
-    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.5 : COMP_KEEP); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
+    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.5 : COMP_KEEP, st); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
   }
-  job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr;
+  job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr; job.sk = { ex: ((job.sk || {}).ex || 0) + st.ex, low: ((job.sk || {}).low || 0) + st.low, rv: ((job.sk || {}).rv || 0) + st.rv };
   await setMeta(env.DB, merchant, JOB, job);
   return job;
 }

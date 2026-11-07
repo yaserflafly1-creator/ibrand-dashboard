@@ -1200,7 +1200,7 @@ $('#compTpl').addEventListener('click', () => {
   $('#compLines').value = top.slice(0,20).map(p => `${p.name} | ${c} | `).join('\n');
 });
 let jobLoop = false;
-const jobText = j => j.running ? `البحث يعمل على الخادم: ${fmt(j.idx)}/${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة. يستمر في الخلفية حتى لو خرجت من الصفحة.${j.found!=null ? ` (وُجد ${fmt(j.found)} مرشحاً` + (j.errors ? ` · أخطاء ${fmt(j.errors)}: ${j.lastErr}` : '') + ')' : ''}` : (j.total ? `انتهى البحث: ${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة · ${fmt(j.missed)} منتجاً بلا مطابقة عند أي منافس.` : '');
+const jobText = j => j.running ? `البحث يعمل على الخادم: ${fmt(j.idx)}/${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة. يستمر في الخلفية حتى لو خرجت من الصفحة.${j.found!=null ? ` (وُجد ${fmt(j.found)} مرشحاً` + (j.sk ? ` · مسجّل سابقاً/مستبعد ${fmt(j.sk.ex)} · نسبة منخفضة ${fmt(j.sk.low)} · يخص منتجاً آخر ${fmt(j.sk.rv)}` : '') + (j.errors ? ` · أخطاء ${fmt(j.errors)}: ${j.lastErr}` : '') + ')' : ''}` : (j.total ? `انتهى البحث: ${fmt(j.total)} منتج · أُضيف ${fmt(j.added)} مطابقة · ${fmt(j.missed)} منتجاً بلا مطابقة عند أي منافس.` : '');
 async function jobRun(){   // يدفع المهمة بدفعات صغيرة ما دامت الصفحة مفتوحة؛ وإن أُغلقت يكمل الجدول المجدول على الخادم
   if(jobLoop || SHARE) return; jobLoop = true; const bar = $('#compJobBar'), btn = $('#compSuggest'); btn.disabled = true;
   try{
