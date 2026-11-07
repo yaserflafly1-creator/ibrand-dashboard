@@ -24,6 +24,7 @@ function* walk(node, depth = 0) {
 }
 
 // يرجع { price, currency, avail, title } أو null إن لم يوجد سعر
+const codeOf = (v) => { const d = String(v ?? '').replace(/\D/g, ''); return d.length >= 8 && d.length <= 14 ? d : null; };
 export function parseProductPage(html) {
   html = String(html || '');
   let found = null;
@@ -35,12 +36,15 @@ export function parseProductPage(html) {
       if (!/Product/i.test(t) || !n.offers) continue;
       const offers = [].concat(n.offers), o = offers.find((x) => toNum(x?.price ?? x?.lowPrice ?? x?.priceSpecification?.price)) || offers[0];
       const price = toNum(o?.price ?? o?.lowPrice ?? o?.priceSpecification?.price);
-      if (price) { found = { price, currency: String(o.priceCurrency || o.priceSpecification?.priceCurrency || '').slice(0, 5), avail: availOf(o.availability), title: decode(n.name).slice(0, 200) }; break; }
+      if (price) {
+        const codes = [...new Set(['sku', 'gtin', 'gtin8', 'gtin12', 'gtin13', 'gtin14', 'mpn', 'productID'].flatMap((k) => [codeOf(n[k]), codeOf(o[k])]).filter(Boolean))];   // الباركود يرد غالباً في sku/gtin/mpn
+        found = { price, currency: String(o.priceCurrency || o.priceSpecification?.priceCurrency || '').slice(0, 5), avail: availOf(o.availability), title: decode(n.name).slice(0, 200), codes }; break;
+      }
     }
   }
   if (!found) {
     const price = toNum(meta(html, /<meta[^>]+(?:property|name)=["'](?:product:price:amount|og:price:amount|twitter:data1)["'][^>]*content=["']([^"']+)["']/i) || meta(html, /<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:product:price:amount|og:price:amount)["']/i) || meta(html, /itemprop=["']price["'][^>]*content=["']([^"']+)["']/i));
-    if (price) found = { price, currency: String(meta(html, /(?:product:price:currency|og:price:currency)["'][^>]*content=["']([^"']+)["']/i) || '').slice(0, 5), avail: availOf(meta(html, /(?:product:availability|og:availability)["'][^>]*content=["']([^"']+)["']/i)), title: '' };
+    if (price) found = { price, currency: String(meta(html, /(?:product:price:currency|og:price:currency)["'][^>]*content=["']([^"']+)["']/i) || '').slice(0, 5), avail: availOf(meta(html, /(?:product:availability|og:availability)["'][^>]*content=["']([^"']+)["']/i)), title: '', codes: [] };
   }
   if (!found) return null;
   if (!found.title) found.title = decode(meta(html, /<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i) || meta(html, /<title[^>]*>([^<]+)<\/title>/i)).slice(0, 200);
@@ -69,13 +73,14 @@ export async function checkCompetitorUrl(url, fetchFn = fetch) {
 }
 
 /* ---------- قاعدة البيانات ---------- */
-export const compList = async (db, m) => (await db.prepare('SELECT id, product, competitor, url, price, currency, avail, title, checked, err, ignored FROM comp_item WHERE merchant = ? ORDER BY product, competitor').bind(m).all()).results;
-export async function compUpsert(db, m, { product, competitor, url }) {
-  await db.prepare('INSERT INTO comp_item (merchant, product, competitor, url) VALUES (?, ?, ?, ?) ON CONFLICT(merchant, product, competitor) DO UPDATE SET url = excluded.url, checked = 0, err = \'\', ignored = 0').bind(m, product, competitor, url).run();
+export const compList = async (db, m) => (await db.prepare('SELECT id, product, competitor, url, price, currency, avail, title, checked, err, ignored, matchby, score, verified, code FROM comp_item WHERE merchant = ? ORDER BY product, competitor').bind(m).all()).results;
+export async function compUpsert(db, m, { product, competitor, url, matchby = '', score = null, verified = 0, code = '' }) {
+  await db.prepare('INSERT INTO comp_item (merchant, product, competitor, url, matchby, score, verified, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(merchant, product, competitor) DO UPDATE SET url = excluded.url, checked = 0, err = \'\', ignored = 0, matchby = excluded.matchby, score = excluded.score, verified = excluded.verified, code = excluded.code').bind(m, product, competitor, url, matchby, score, verified ? 1 : 0, code).run();
   return (await db.prepare('SELECT id FROM comp_item WHERE merchant = ? AND product = ? AND competitor = ?').bind(m, product, competitor).first()).id;
 }
 export const compDelete = (db, m, id) => db.batch([db.prepare('DELETE FROM comp_item WHERE merchant = ? AND id = ?').bind(m, id), db.prepare('DELETE FROM comp_hist WHERE merchant = ? AND item_id = ?').bind(m, id)]);
 export const compIgnore = (db, m, id, on) => db.prepare('UPDATE comp_item SET ignored = ? WHERE merchant = ? AND id = ?').bind(on ? 1 : 0, m, id).run();
+export const compVerify = (db, m, id, on) => db.prepare('UPDATE comp_item SET verified = ? WHERE merchant = ? AND id = ?').bind(on ? 1 : 0, m, id).run();
 export const compOne = (db, m, id) => db.prepare('SELECT * FROM comp_item WHERE merchant = ? AND id = ?').bind(m, id).first();
 export const compDue = async (db, m, beforeTs, limit) => (await db.prepare('SELECT id, url FROM comp_item WHERE merchant = ? AND ignored = 0 AND checked < ? ORDER BY checked LIMIT ?').bind(m, beforeTs, limit).all()).results;
 export async function compSave(db, m, id, res, now, day) {

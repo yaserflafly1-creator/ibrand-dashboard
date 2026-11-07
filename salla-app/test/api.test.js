@@ -349,3 +349,33 @@ test('competitors API: add/check, our price (+VAT) vs competitor, ignore/delete,
   assert.equal((await worker.fetch(new Request('https://x.test/api/competitors', { headers: { authorization: 'Share ' + c.id } }), env)).status, 401);   // رابط المشاركة لا يرى أسعار المنافسين
   globalThis.fetch = prev;
 });
+
+test('competitors: suggest uses our barcode (sku) + English slug; weekly job adds sure matches (barcode = verified) for top sellers, 2 products per tick, once a week', async () => {
+  const { compCron } = await import('../src/worker.js');
+  const env = mkEnv();
+  const code = '6281008298482';
+  const page = `<script type="application/ld+json">{"@type":"Product","name":"بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة","sku":"${code}","offers":{"price":95.72,"availability":"https://schema.org/InStock"}}</script>`;
+  const prev = globalThis.fetch; let salla = 0;
+  mockFetch(good, { '/products': (u) => { salla++; return ok([{ name: 'بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة', sku: code, mpn: '1012406569', metadata: { url: 'baby-joy-size-5-box-jumbo-80-diaper' } }]); } });
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://sidalih.com/search')) return new Response(decodeURIComponent(u).includes(code) ? '<a href="/products/baby-joy-5"></a>' : '');
+    if (u === 'https://sidalih.com/products/baby-joy-5') return new Response(`<html>${page}</html>`);
+    if (u.startsWith('https://api.test') || u.startsWith('https://i.test')) return base(url, init);
+    if (u.startsWith('https://')) return new Response('', { status: 404 });   // بقية مواقع المنافسين
+    return base(url, init);
+  };
+  await seedDay(env, riyadhDay(Date.now() - 864e5), [{ t: 100, items: [{ name: 'بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة', quantity: 3 }] }, { t: 50, items: [{ name: 'منتج آخر', quantity: 1 }] }, { t: 50, items: [{ name: 'ثالث', quantity: 1 }] }]);
+  const post = (path, body) => worker.fetch(new Request('https://x.test/api/competitors' + path, { method: 'POST', body: JSON.stringify(body), headers: auth.headers }), env);
+  const sg = await (await post('/suggest', { product: 'بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة' })).json();
+  assert.equal(sg.barcode, code); assert.equal(sg.suggestions[0].competitor, 'صيدلية كوم'); assert.equal(sg.suggestions[0].matchby, 'barcode'); assert.equal(sg.suggestions[0].score, 1);
+  await compCron(env, Date.now());                                    // أول تشغيل: يبني قائمة الأعلى مبيعاً ويعالج منتجين
+  let items = (await (await get(env, '/api/competitors')).json()).items;
+  const it = items.find((x) => x.competitor === 'صيدلية كوم'); assert.ok(it); assert.equal(it.matchby, 'barcode'); assert.equal(it.verified, 1); assert.equal(it.price, 95.72); assert.equal(it.code, code);
+  const st = await (await import('../src/db.js')).getMeta(env.DB, '346539387', 'comp_weekly', null); assert.equal(st.idx, 2); assert.equal(st.queue.length, 3);
+  await compCron(env, Date.now()); const st2 = await (await import('../src/db.js')).getMeta(env.DB, '346539387', 'comp_weekly', null); assert.equal(st2.idx, 3);   // المنتج الثالث
+  const before = salla; await compCron(env, Date.now()); assert.equal(salla, before);       // لا بحث جديد قبل مرور أسبوع
+  await post('/verify', { id: it.id, on: false }); items = (await (await get(env, '/api/competitors')).json()).items; assert.equal(items.find((x) => x.id === it.id).verified, 0);
+  globalThis.fetch = prev;
+});

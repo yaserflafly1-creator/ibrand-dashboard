@@ -408,17 +408,17 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
     <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><button class="btn" id="compRefresh" type="button">تحديث</button></div>
     <div class="mini-kpis" id="compKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div class="buy-tools">
-      <div class="seg" id="compMode" role="group" aria-label="التصفية"><button type="button" data-m="all" class="on">الكل</button><button type="button" data-m="exp">أنت أغلى</button><button type="button" data-m="chp">أنت أرخص</button><button type="button" data-m="err">أخطاء</button></div>
+      <div class="seg" id="compMode" role="group" aria-label="التصفية"><button type="button" data-m="all" class="on">الكل</button><button type="button" data-m="exp">أنت أغلى</button><button type="button" data-m="chp">أنت أرخص</button><button type="button" data-m="unv">غير متحقق منها</button><button type="button" data-m="err">أخطاء</button></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="compFilter" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="">كل المنافسين</option></select><input id="compSearch" type="search" placeholder="ابحث باسم المنتج…" autocomplete="off" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit;min-width:160px"></div>
     </div>
-    <div class="tbl-wrap"><table><thead><tr><th>المنتج</th><th>المنافس</th><th>سعرنا</th><th>سعرهم</th><th>الفرق</th><th>الحالة</th><th class="mh">آخر فحص</th><th></th></tr></thead><tbody id="compRows"></tbody></table></div>
+    <div class="tbl-wrap"><table><thead><tr><th>المنتج</th><th>المنافس</th><th>سعرنا</th><th>سعرهم</th><th>الفرق</th><th>الحالة</th><th>التطابق</th><th class="mh">آخر فحص</th><th></th></tr></thead><tbody id="compRows"></tbody></table></div>
     <details style="margin-top:14px" id="compAdd"><summary style="cursor:pointer;font-weight:700">إضافة منتجات للمراقبة</summary>
       <p class="period-note" style="margin:10px 0">سطر لكل منتج بالشكل: <b>اسم المنتج | المنافس | رابط صفحة المنتج عند المنافس</b>. اسم المنتج يجب أن يطابق اسمه في متجرك. يمكنك لصق أعمدة من جوجل شيت مباشرة. المواقع التي جرّبتُ قراءة صفحات منتجاتها فنجحت: النهدي (nahdionline.com)، صيدلية المتحدة (unitedpharmacy.sa)، فارما براند (pharmabrand.sa)، صيدلية كوم (sidalih.com)، دار الأميرات (daralamirat.com.sa)، اوت ليت العناية (care-outlet.com). المجتمع يعرض أسعاره بالجافاسكربت فلا يُقرأ بهذه الطريقة.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="compTplComp" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option>النهدي</option><option>صيدلية المتحدة</option><option>فارما براند</option><option>صيدلية كوم</option><option>دار الأميرات</option><option>اوت ليت العناية</option><option>الدواء</option><option>المجتمع</option></select><button class="btn" id="compTpl" type="button">املأ القالب بأعلى 20 منتجاً</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="compTplComp" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option>النهدي</option><option>صيدلية المتحدة</option><option>ماي براند</option><option>فارما براند</option><option>صيدلية كوم</option><option>دار الأميرات</option><option>اوت ليت العناية</option></select><button class="btn" id="compTpl" type="button">املأ القالب بأعلى 20 منتجاً</button></div>
       <div style="border:1px dashed var(--border);border-radius:12px;padding:12px;margin:0 0 12px">
         <b>اقتراح تلقائي</b>
-        <p class="period-note" style="margin:6px 0 8px">يبحث عن أعلى 20 منتجاً عندك في <b>صيدلية كوم وفارما براند ودار الأميرات</b>. المطابقة القوية (75% فأكثر) <b>تُضاف للمراقبة تلقائياً</b> مع سعرها، والأضعف تعرضها لتراجعها. (النهدي وصيدلية المتحدة واوت ليت العناية: أضف رابطها يدوياً.) وإن أُضيف منتج خطأ فزر «ليس نفس المنتج» في الجدول يستبعده.</p>
-        <button class="btn" id="compSuggest" type="button">ابحث تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
+        <p class="period-note" style="margin:6px 0 8px">يبحث عن المنتجات الأكثر مبيعاً عندك <b>بالباركود أولاً ثم بالاسم</b> (مع تسامح في الاختلافات البسيطة: جم/جرام، حفاضة/حفاضات، حرف في التهجئة) في: صيدلية كوم، اوت ليت العناية، فارما براند، دار الأميرات، النهدي، ماي براند، صيدلية المتحدة. <b>مطابقة الباركود تُضاف وتُعتبر متحققاً منها</b>، ومطابقة الاسم القوية (75%+) تُضاف وتنتظر تحققك (عمود «تم التحقق»)، والأضعف تعرضها لتراجعها. ويعيد النظام البحث تلقائياً <b>كل أسبوع</b>. وإن أُضيف منتج خطأ فزر «ليس نفس المنتج» يستبعده</p>
+        <select id="compSugN" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option value="20">أعلى 20 منتجاً</option><option value="50" selected>أعلى 50 منتجاً</option><option value="100">أعلى 100 منتج</option></select> <button class="btn" id="compSuggest" type="button">ابحث تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
         <div class="tbl-wrap" id="compSugWrap" hidden style="margin-top:10px"><table><thead><tr><th></th><th>منتجنا</th><th>المنافس</th><th>المنتج عندهم</th><th>سعرهم</th><th>التطابق</th></tr></thead><tbody id="compSugRows"></tbody></table></div>
         <button class="btn btn-primary" id="compSugApply" type="button" hidden style="margin-top:8px">اعتماد المحدد</button>
       </div>
@@ -1132,7 +1132,7 @@ function renderAi(){
 
 /* ============ تحليل المنافسين (فحص مجاني من الخادم؛ داخل سلة فقط) ============ */
 let compData = null, compMode = 'all', compSeq = 0, compAt = 0;
-const COMP_NAMES = ['النهدي','صيدلية المتحدة','فارما براند','صيدلية كوم','دار الأميرات','اوت ليت العناية','الدواء','المجتمع'];
+const COMP_NAMES = ['النهدي','صيدلية المتحدة','ماي براند','فارما براند','صيدلية كوم','دار الأميرات','اوت ليت العناية'];
 function demoComp(){
   const now = Date.now(), tops = (PRODUCTS||[]).slice(0,8), items = []; let id = 1;
   tops.forEach((p,i) => COMP_NAMES.slice(0, 3+(i%3)).forEach((c,j) => { const our = Math.round(p.p*1.15*100)/100, price = Math.round(our*(0.86+((i*3+j*5)%9)*0.045)*100)/100;
@@ -1147,28 +1147,31 @@ async function loadComp(force){
   catch(e){ if(seq !== compSeq) return; compData = null; $('#compNote').textContent = e.status===401 ? 'هذا التقرير متاح داخل سلة فقط.' : 'تعذّر تحميل بيانات المنافسين.'; }
   renderComp();
 }
+const matchCell = x => { const v = x.verified ? ' <span title="تم التحقق" style="color:#16a34a">✓</span>' : '';
+  return x.matchby==='barcode' ? `<b style="color:#16a34a">باركود</b>${v}` : x.matchby==='name' ? `<b style="color:${x.score>=0.75?'#16a34a':'#d97706'}">اسم ${Math.round((x.score||0)*100)}%</b>${v}` : `<span style="color:var(--muted)">يدوي</span>${v}`; };
 function renderComp(){
   if(!$('#compPanel') || !compData) return;
   const all = compData.items, live = all.filter(x => !x.ignored);
   const sel = $('#compFilter'), cur = sel.value, names = [...new Set(all.map(x => x.competitor))];
   sel.innerHTML = '<option value="">كل المنافسين</option>' + names.map(n => `<option${n===cur?' selected':''}>${esc(n)}</option>`).join('');
   const exp = live.filter(x => x.diffPct!=null && x.diffPct > 2).length, chp = live.filter(x => x.diffPct!=null && x.diffPct < -2).length, errs = live.filter(x => x.err).length;
-  $('#compKpis').innerHTML = [[fmt(new Set(live.map(x => x.product)).size), 'منتجات تحت المراقبة'], [fmt(exp), 'منتجات أنت أغلى فيها (>2%)'], [fmt(chp), 'منتجات أنت أرخص فيها (>2%)'], [fmt(errs), 'روابط فيها خطأ']].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
+  $('#compKpis').innerHTML = [[fmt(new Set(live.map(x => x.product)).size), 'منتجات تحت المراقبة'], [fmt(exp), 'منتجات أنت أغلى فيها (>2%)'], [fmt(chp), 'منتجات أنت أرخص فيها (>2%)'], [fmt(live.filter(x => !x.verified).length), 'مطابقات لم تتحقق منها بعد']].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
   const q = ($('#compSearch').value||'').trim().toLowerCase(), cf = $('#compFilter').value;
   let rows = all.filter(x => (!cf || x.competitor===cf) && (!q || x.product.toLowerCase().includes(q)) &&
-    (compMode==='all' || (compMode==='exp' && !x.ignored && x.diffPct!=null && x.diffPct>2) || (compMode==='chp' && !x.ignored && x.diffPct!=null && x.diffPct<-2) || (compMode==='err' && x.err)));
+    (compMode==='all' || (compMode==='exp' && !x.ignored && x.diffPct!=null && x.diffPct>2) || (compMode==='chp' && !x.ignored && x.diffPct!=null && x.diffPct<-2) || (compMode==='unv' && !x.ignored && !x.verified) || (compMode==='err' && x.err)));
   rows.sort((a,b) => (b.diffPct==null ? -1e9 : b.diffPct) - (a.diffPct==null ? -1e9 : a.diffPct));
   $('#compRows').innerHTML = rows.length ? rows.map(x => {
     const d = x.diffPct, dcell = d==null ? '—' : `<b style="color:${d>2?'#dc2626':d<-2?'#16a34a':'inherit'}">${d>0?'▲ +':d<0?'▼ ':''}${d.toFixed(1)}%</b>`;
     const st = x.err ? `<span style="color:#dc2626;font-size:.78rem">${esc(x.err)}</span>` : x.avail===0 ? '<span style="color:#dc2626;font-weight:700">غير متوفر عندهم</span>' : x.avail===1 ? '<span style="color:#16a34a;font-weight:700">متوفر</span>' : '—';
-    return `<tr${x.ignored?' style="opacity:.45"':''}><td dir="auto">${esc(x.product)}${x.ourPrice==null ? '<br><small style="color:#dc2626">الاسم غير موجود في كتالوجنا</small>' : ''}</td><td>${esc(x.competitor)}</td><td>${x.ourPrice==null ? '—' : money(x.ourPrice)}</td><td>${x.price==null ? '—' : money(x.price)}</td><td>${x.ignored ? 'مستبعد' : dcell}</td><td>${st}</td><td class="mh">${x.checked ? ageText(x.checked) : 'لم يُفحص'}</td>
-      <td style="white-space:nowrap"><a class="linkbtn" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">فتح</a> · <button class="linkbtn" data-ck="${x.id}" type="button">فحص</button> · <button class="linkbtn" data-ig="${x.id}" data-on="${x.ignored?0:1}" type="button">${x.ignored?'إرجاع':'ليس نفس المنتج'}</button> · <button class="linkbtn" data-dl="${x.id}" type="button">حذف</button></td></tr>`; }).join('') : '<tr><td colspan="8" class="empty">لا توجد منتجات مراقَبة بعد. افتح «إضافة منتجات للمراقبة» أدناه.</td></tr>';
+    return `<tr${x.ignored?' style="opacity:.45"':''}><td dir="auto">${esc(x.product)}${x.ourPrice==null ? '<br><small style="color:#dc2626">الاسم غير موجود في كتالوجنا</small>' : ''}</td><td>${esc(x.competitor)}${x.title ? `<br><small dir="auto" style="color:var(--muted)">${esc(x.title.slice(0,60))}</small>` : ''}</td><td>${x.ourPrice==null ? '—' : money(x.ourPrice)}</td><td>${x.price==null ? '—' : money(x.price)}</td><td>${x.ignored ? 'مستبعد' : dcell}</td><td>${st}</td><td>${matchCell(x)}</td><td class="mh">${x.checked ? ageText(x.checked) : 'لم يُفحص'}</td>
+      <td style="white-space:nowrap"><a class="linkbtn" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">فتح</a> · <button class="linkbtn" data-ck="${x.id}" type="button">فحص</button> · <button class="linkbtn" data-vf="${x.id}" data-on="${x.verified?0:1}" type="button">${x.verified?'إلغاء التحقق':'تم التحقق ✓'}</button> · <button class="linkbtn" data-ig="${x.id}" data-on="${x.ignored?0:1}" type="button">${x.ignored?'إرجاع':'ليس نفس المنتج'}</button> · <button class="linkbtn" data-dl="${x.id}" type="button">حذف</button></td></tr>`; }).join('') : '<tr><td colspan="9" class="empty">لا توجد منتجات مراقَبة بعد. افتح «إضافة منتجات للمراقبة» أدناه.</td></tr>';
   $('#compNote').textContent = 'سعرنا = السعر في سلة + 15% ضريبة للمنتجات الخاضعة لها. الفرق = سعرنا مقارنةً بسعرهم (موجب = نحن أغلى). الفحص يقرأ السعر المنظّم من صفحة المنتج؛ إن كان الموقع يحجب الجلب الآلي أو يعرض السعر بالجافاسكربت فقط يظهر خطأ في الحالة.';
 }
 document.addEventListener('click', async e => {
-  const b = e.target.closest('[data-ck],[data-ig],[data-dl]'); if(!b || !b.closest('#compRows')) return;
+  const b = e.target.closest('[data-ck],[data-ig],[data-dl],[data-vf]'); if(!b || !b.closest('#compRows')) return;
   try{
     if(b.dataset.ck){ b.disabled = true; b.textContent = '…'; await api('/api/competitors/check', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:+b.dataset.ck})}); }
+    else if(b.dataset.vf){ await api('/api/competitors/verify', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:+b.dataset.vf, on:b.dataset.on==='1'})}); }
     else if(b.dataset.ig){ await api('/api/competitors/ignore', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:+b.dataset.ig, ignored:b.dataset.on==='1'})}); }
     else if(b.dataset.dl){ if(!confirm('حذف هذا الرابط من المراقبة؟')) return; await api('/api/competitors?id='+b.dataset.dl, {method:'DELETE'}); }
   }catch(err){ toast('تعذّر تنفيذ العملية'); }
@@ -1186,12 +1189,12 @@ $('#compTpl').addEventListener('click', () => {
 let compSug = [];
 function renderSug(){
   $('#compSugWrap').hidden = !compSug.length; $('#compSugApply').hidden = !compSug.length;
-  $('#compSugRows').innerHTML = compSug.map((x,i) => `<tr><td><input type="checkbox" data-sg="${i}"${x.on?' checked':''}></td><td dir="auto">${esc(x.product)}</td><td>${esc(x.competitor)}</td><td dir="auto"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||'فتح')}</a></td><td>${money(x.price)}</td><td><b style="color:${x.score>=0.75?'#16a34a':x.score>=0.5?'#d97706':'#dc2626'}">${Math.round(x.score*100)}%</b></td></tr>`).join('');
+  $('#compSugRows').innerHTML = compSug.map((x,i) => `<tr><td><input type="checkbox" data-sg="${i}"${x.on?' checked':''}></td><td dir="auto">${esc(x.product)}</td><td>${esc(x.competitor)}</td><td dir="auto"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||'فتح')}</a></td><td>${money(x.price)}</td><td>${x.matchby==='barcode' ? '<b style="color:#16a34a">باركود</b>' : `<b style="color:${x.score>=0.75?'#16a34a':x.score>=0.5?'#d97706':'#dc2626'}">اسم ${Math.round(x.score*100)}%</b>`}</td></tr>`).join('');
 }
 document.addEventListener('change', e => { const c = e.target.closest('[data-sg]'); if(c) compSug[+c.dataset.sg].on = c.checked; });
 $('#compSuggest').addEventListener('click', async () => {
   if(!LIVE){ toast('الاقتراح التلقائي متاح داخل سلة فقط'); return; }
-  const top = ((state.view && state.view.cur && state.view.cur.top) || []).slice(0,20).map(p => p.name);
+  const top = ((state.view && state.view.cur && (state.view.cur.products || state.view.cur.top)) || []).slice(0, +$('#compSugN').value || 50).map(p => p.name);
   if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
   const btn = $('#compSuggest'); btn.disabled = true; compSug = []; renderSug();
   const have = new Set(((compData && compData.items) || []).map(x => x.product+'|'+x.competitor));
@@ -1201,22 +1204,22 @@ $('#compSuggest').addEventListener('click', async () => {
     try{
       const r = await api('/api/competitors/suggest', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({product:top[i]})});
       const best = {};   // أفضل مرشّح لكل منافس
-      (r.suggestions||[]).forEach(x => { if(x.score >= 0.4 && (!best[x.competitor] || x.score > best[x.competitor].score) && !have.has(top[i]+'|'+x.competitor)) best[x.competitor] = x; });
-      const found = Object.values(best), sure = found.filter(x => x.score >= 0.75), maybe = found.filter(x => x.score < 0.75);
+      (r.suggestions||[]).forEach(x => { if((x.matchby==='barcode' || x.score >= 0.4) && (!best[x.competitor] || x.score > best[x.competitor].score) && !have.has(top[i]+'|'+x.competitor)) best[x.competitor] = x; });
+      const found = Object.values(best), isSure = x => x.matchby==='barcode' || x.score >= 0.75, sure = found.filter(isSure), maybe = found.filter(x => !isSure(x));
       if(sure.length){   // مطابقة قوية: تُضاف للمراقبة فوراً بسعرها المقروء، بلا انتظار اعتماد
-        try{ const a = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines:sure.map(x => ({product:top[i], competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title})), check:false})}); autoAdded += a.added || 0; sure.forEach(x => have.add(top[i]+'|'+x.competitor)); loadComp(true); }
+        try{ const a = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines:sure.map(x => ({product:top[i], competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title, matchby:x.matchby, score:x.score, code:x.code})), check:false})}); autoAdded += a.added || 0; sure.forEach(x => have.add(top[i]+'|'+x.competitor)); loadComp(true); }
         catch(err){ sure.forEach(x => compSug.push({...x, product:top[i], on:true})); }
       }
       maybe.forEach(x => compSug.push({...x, product:top[i], on:false}));   // مطابقة ضعيفة: تنتظر مراجعتك
       renderSug();
     }catch(err){ /* نتابع للمنتج التالي */ }
   }
-  $('#compSuggestState').textContent = `أُضيف تلقائياً للمراقبة: ${autoAdded} (مطابقة 75%+).` + (compSug.length ? ` وتحتاج مراجعتك: ${compSug.length} (مطابقة أضعف، حدّد ما يصح ثم «اعتماد المحدد»).` : ' لا توجد اقتراحات أخرى تحتاج مراجعة.');
+  $('#compSuggestState').textContent = `أُضيف تلقائياً للمراقبة: ${autoAdded} (باركود أو اسم 75%+).` + (compSug.length ? ` وتحتاج مراجعتك: ${compSug.length} (مطابقة أضعف، حدّد ما يصح ثم «اعتماد المحدد»).` : ' لا توجد اقتراحات أخرى تحتاج مراجعة.');
   loadComp(true);
   btn.disabled = false;
 });
 $('#compSugApply').addEventListener('click', async () => {
-  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title}));   // السعر مقروء للتو فيُحفظ فوراً
+  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url, price:x.price, avail:x.avail, title:x.title, matchby:x.matchby, score:x.score, code:x.code}));   // السعر مقروء للتو فيُحفظ فوراً
   if(!lines.length){ toast('لم تحدد شيئاً'); return; }
   try{ const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines, check:false})}); toast(`أُضيف ${r.added} للمراقبة`); compSug = compSug.filter(x => !x.on); renderSug(); }
   catch(err){ toast('تعذّر الاعتماد'); }

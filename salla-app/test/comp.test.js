@@ -9,9 +9,10 @@ test('toNum: Arabic digits, thousands and decimal commas', () => {
 
 test('parseProductPage: JSON-LD Product (single, graph, offers array), availability, title', () => {
   const ld = (o) => `<html><head><script type="application/ld+json">${JSON.stringify(o)}</script></head></html>`;
-  assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'حليب &amp; نمو', offers: { '@type': 'Offer', price: '89.90', priceCurrency: 'SAR', availability: 'https://schema.org/InStock' } })), { price: 89.9, currency: 'SAR', avail: 1, title: 'حليب & نمو' });
+  assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'حليب &amp; نمو', offers: { '@type': 'Offer', price: '89.90', priceCurrency: 'SAR', availability: 'https://schema.org/InStock' } })), { price: 89.9, currency: 'SAR', avail: 1, title: 'حليب & نمو', codes: [] });
   const g = parseProductPage(ld({ '@graph': [{ '@type': 'WebSite' }, { '@type': ['Product'], name: 'X', offers: [{ price: 0 }, { price: 12, availability: 'OutOfStock' }] }] }));
   assert.equal(g.price, 12); assert.equal(g.avail, 0);
+  assert.deepEqual(parseProductPage(ld({ '@type': 'Product', name: 'B', sku: '6281008298482', mpn: 'abc', gtin13: '6281008298482', offers: { price: 5 } })).codes, ['6281008298482']);   // الباركود من sku/gtin
   assert.equal(parseProductPage(ld({ '@type': 'Product', name: 'Y', offers: { '@type': 'AggregateOffer', lowPrice: '7.5' } })).price, 7.5);
   assert.equal(parseProductPage('<script type="application/ld+json">{bad json</script><script type="application/ld+json">{"@type":"Product","name":"Z","offers":{"price":3}}</script>').price, 3);
 });

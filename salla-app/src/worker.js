@@ -1,8 +1,8 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
-import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
-import { suggestFor } from './suggest.js';
-import { compList, compUpsert, compDelete, compIgnore, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
+import { ensureSchema, getMeta, setMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
+import { suggestFor, matchScore, normText } from './suggest.js';
+import { compList, compUpsert, compDelete, compIgnore, compVerify, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
 
@@ -593,6 +593,50 @@ async function checkComp(env, merchant, id, now = Date.now()) {
   await compSave(env.DB, merchant, id, res, now, riyadhDay(now));
   return res;
 }
+// باركود المنتج (sku في سلة) ورابطه الإنجليزي عندنا، للمطابقة مع المنافسين
+async function ourInfo(get, name) {
+  try {
+    const j = await get('/products', { keyword: name, per_page: 5, format: 'light' });
+    const rows = j.data || [], n = normText(name);
+    const p = rows.find((x) => normText(x.name) === n) || rows.find((x) => matchScore(name, x.name) >= 0.9);
+    if (!p) return {};
+    const code = [p.sku, p.gtin, p.mpn].map((v) => String(v || '').replace(/\D/g, '')).find((d) => d.length >= 8 && d.length <= 14) || '';
+    const slug = /^[a-z0-9-]{6,}$/i.test(String(p.metadata?.url || '')) ? String(p.metadata.url).toLowerCase() : '';
+    return { barcode: code, slug };
+  } catch (e) { return {}; }
+}
+const COMP_TOP = 50, COMP_SURE = 0.75;
+// أفضل مرشّح لكل منافس يُضاف للمراقبة: مطابقة بالباركود (مُتحقَّق منها تلقائياً) أو بالاسم بدرجة عالية
+async function addSuggestions(env, merchant, product, suggestions, existing) {
+  const best = new Map();
+  for (const x of suggestions) if ((x.matchby === 'barcode' || x.score >= COMP_SURE) && !existing.has(product + '|' + x.competitor) && (!best.has(x.competitor) || x.score > best.get(x.competitor).score)) best.set(x.competitor, x);
+  let n = 0;
+  for (const x of best.values()) {
+    const id = await compUpsert(env.DB, merchant, { product, competitor: x.competitor, url: x.url, matchby: x.matchby, score: x.score, verified: x.matchby === 'barcode' ? 1 : 0, code: x.code || '' });
+    await compSave(env.DB, merchant, id, { ok: true, price: x.price, currency: 'SAR', avail: x.avail, title: x.title }, Date.now(), riyadhDay(Date.now()));
+    existing.add(product + '|' + x.competitor); n++;
+  }
+  return n;
+}
+// بحث أسبوعي تلقائي لأعلى المنتجات مبيعاً: كل تشغيل يعالج منتجين حتى تنتهي القائمة
+async function compWeekly(env, merchant, now) {
+  const st = await getMeta(env.DB, merchant, 'comp_weekly', { start: 0, queue: [], idx: 0 });
+  if (!st.queue.length || st.idx >= st.queue.length) {
+    if (now - st.start < 7 * 864e5) return 0;
+    const today = riyadhDay(now), rows = await rangeRows(env.DB, merchant, addDays(today, -30), today);
+    st.queue = sumDays(rows, true, null).products.slice(0, Number(env.COMP_TOP) || COMP_TOP).map((p) => p.name); st.idx = 0; st.start = now;
+    if (!st.queue.length) { await setMeta(env.DB, merchant, 'comp_weekly', st); return 0; }
+  }
+  const tokens = await loadTokens(env, merchant); if (!tokens) return 0;
+  const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor));
+  let added = 0;
+  for (let i = 0; i < 2 && st.idx < st.queue.length; i++, st.idx++) {
+    const name = st.queue[st.idx];
+    try { added += await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS }), existing); } catch (e) { /* ننتقل للمنتج التالي */ }
+  }
+  await setMeta(env.DB, merchant, 'comp_weekly', st);
+  return added;
+}
 async function handleCompetitors(req, env) {
   const merchant = await merchantFromEmbeddedToken(req, env);
   if (!merchant) return json({ error: 'unauthorized' }, 401);
@@ -606,9 +650,14 @@ async function handleCompetitors(req, env) {
   if (req.method === 'DELETE' && !sub) { await compDelete(env.DB, merchant, Number(u.searchParams.get('id')) || 0); return json({ ok: true }); }
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const b = await req.json().catch(() => ({}));
+  if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
-  if (sub === '/suggest') { const name = String(b.product || '').trim().slice(0, 200); return json({ suggestions: name ? await suggestFor(name, { kv: env.TOKENS }) : [] }); }   // مرشّحون من مواقع المنافسين لتأكيدهم يدوياً
+  if (sub === '/suggest') {   // مرشّحون من مواقع المنافسين (بالباركود ثم الاسم)
+    const name = String(b.product || '').trim().slice(0, 200), tokens = await loadTokens(env, merchant);
+    const info = name && tokens ? await ourInfo(makeClient(env, merchant, tokens), name) : {};
+    return json({ suggestions: name ? await suggestFor(name, { info, kv: env.TOKENS }) : [], barcode: info.barcode || '' });
+  }
   if (sub !== '') return json({ error: 'not found' }, 404);
   const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 300), added = [], rejected = [];
   for (const l of lines) {
@@ -616,7 +665,8 @@ async function handleCompetitors(req, env) {
     if (!product || !competitor) rejected.push({ product, reason: 'المنتج أو المنافس ناقص' });
     else if (!url) rejected.push({ product, reason: 'الرابط غير صالح (يجب أن يكون https لموقع المنافس)' });
     else {
-      const id = await compUpsert(env.DB, merchant, { product, competitor, url });
+      const mb = l?.matchby === 'barcode' ? 'barcode' : l?.matchby === 'name' ? 'name' : '', sc = Number(l?.score);
+      const id = await compUpsert(env.DB, merchant, { product, competitor, url, matchby: mb, score: Number.isFinite(sc) ? sc : null, verified: mb === 'barcode' ? 1 : 0, code: String(l?.code || '').replace(/\D/g, '').slice(0, 14) });
       const pr = Number(l?.price);
       if (Number.isFinite(pr) && pr > 0 && pr < 1e6) await compSave(env.DB, merchant, id, { ok: true, price: pr, currency: 'SAR', avail: l.avail === 1 || l.avail === 0 ? l.avail : null, title: String(l.title || '').slice(0, 200) }, Date.now(), riyadhDay(Date.now()));   // اقتراح مُعتمد: سعره قُرئ للتو، فلا ننتظر الجدول
       else added.push({ id, product, competitor });
@@ -636,6 +686,7 @@ export async function compCron(env, now = Date.now()) {
     const due = await compDue(env.DB, merchant, startOfRiyadhDay(now), Number(env.COMP_PER_RUN) || COMP_PER_RUN);   // ما لم يُفحص اليوم بعد
     await pool(due, 5, (d) => checkComp(env, merchant, d.id, now));
     n += due.length;
+    try { await compWeekly(env, merchant, now); } catch (e) { /* لا نُفشل فحص الأسعار */ }
   }
   return n;
 }

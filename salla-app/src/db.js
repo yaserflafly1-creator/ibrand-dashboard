@@ -23,6 +23,9 @@ export async function ensureSchema(db) {
   ]);
   // عمود الخاضع للضريبة أُضيف لاحقاً: ALTER يفشل بهدوء إن كان موجوداً
   try { await db.prepare('ALTER TABLE catalog ADD COLUMN taxable INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* موجود */ }
+  for (const col of ['matchby TEXT NOT NULL DEFAULT \'\'', 'score REAL', 'verified INTEGER NOT NULL DEFAULT 0', 'code TEXT NOT NULL DEFAULT \'\'']) {   // أعمدة مطابقة المنافسين أُضيفت لاحقاً
+    try { await db.prepare('ALTER TABLE comp_item ADD COLUMN ' + col).run(); } catch (e) { /* موجود */ }
+  }
   ready.add(db);
 }
 
