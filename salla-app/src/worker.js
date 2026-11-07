@@ -1,6 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
+import { suggestFor } from './suggest.js';
 import { compList, compUpsert, compDelete, compIgnore, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
@@ -607,6 +608,7 @@ async function handleCompetitors(req, env) {
   const b = await req.json().catch(() => ({}));
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
+  if (sub === '/suggest') { const name = String(b.product || '').trim().slice(0, 200); return json({ suggestions: name ? await suggestFor(name, { kv: env.TOKENS }) : [] }); }   // مرشّحون من مواقع المنافسين لتأكيدهم يدوياً
   if (sub !== '') return json({ error: 'not found' }, 404);
   const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 300), added = [], rejected = [];
   for (const l of lines) {

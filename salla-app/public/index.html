@@ -415,6 +415,13 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
     <details style="margin-top:14px" id="compAdd"><summary style="cursor:pointer;font-weight:700">إضافة منتجات للمراقبة</summary>
       <p class="period-note" style="margin:10px 0">سطر لكل منتج بالشكل: <b>اسم المنتج | المنافس | رابط صفحة المنتج عند المنافس</b>. اسم المنتج يجب أن يطابق اسمه في متجرك. يمكنك لصق أعمدة من جوجل شيت مباشرة. المواقع التي جرّبتُ قراءة صفحات منتجاتها فنجحت: النهدي (nahdionline.com)، صيدلية المتحدة (unitedpharmacy.sa)، فارما براند (pharmabrand.sa)، صيدلية كوم (sidalih.com)، دار الأميرات (daralamirat.com.sa)، اوت ليت العناية (care-outlet.com). المجتمع يعرض أسعاره بالجافاسكربت فلا يُقرأ بهذه الطريقة.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="compTplComp" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"><option>النهدي</option><option>صيدلية المتحدة</option><option>فارما براند</option><option>صيدلية كوم</option><option>دار الأميرات</option><option>اوت ليت العناية</option><option>الدواء</option><option>المجتمع</option></select><button class="btn" id="compTpl" type="button">املأ القالب بأعلى 20 منتجاً</button></div>
+      <div style="border:1px dashed var(--border);border-radius:12px;padding:12px;margin:0 0 12px">
+        <b>اقتراح تلقائي</b>
+        <p class="period-note" style="margin:6px 0 8px">يبحث عن أعلى 20 منتجاً عندك في <b>صيدلية كوم وفارما براند ودار الأميرات</b> ويقترح الروابط لتؤكدها. (النهدي وصيدلية المتحدة واوت ليت العناية: أضف رابطها يدوياً.) المطابقة بالاسم، فراجع كل اقتراح قبل اعتماده.</p>
+        <button class="btn" id="compSuggest" type="button">ابحث تلقائياً</button> <span id="compSuggestState" class="period-note" style="margin:0 8px"></span>
+        <div class="tbl-wrap" id="compSugWrap" hidden style="margin-top:10px"><table><thead><tr><th></th><th>منتجنا</th><th>المنافس</th><th>المنتج عندهم</th><th>سعرهم</th><th>التطابق</th></tr></thead><tbody id="compSugRows"></tbody></table></div>
+        <button class="btn btn-primary" id="compSugApply" type="button" hidden style="margin-top:8px">اعتماد المحدد</button>
+      </div>
       <textarea id="compLines" rows="6" dir="auto" placeholder="مثال:&#10;حليب نان 1 | النهدي | https://www.nahdionline.com/..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:12px;font:inherit"></textarea>
       <button class="btn btn-primary" id="compSubmit" type="button" style="margin-top:8px">إضافة وفحص</button>
     </details>
@@ -1175,6 +1182,38 @@ $('#compTpl').addEventListener('click', () => {
   const top = (state.view && state.view.cur && state.view.cur.top) || [], c = $('#compTplComp').value;
   if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
   $('#compLines').value = top.slice(0,20).map(p => `${p.name} | ${c} | `).join('\n');
+});
+let compSug = [];
+function renderSug(){
+  $('#compSugWrap').hidden = !compSug.length; $('#compSugApply').hidden = !compSug.length;
+  $('#compSugRows').innerHTML = compSug.map((x,i) => `<tr><td><input type="checkbox" data-sg="${i}"${x.on?' checked':''}></td><td dir="auto">${esc(x.product)}</td><td>${esc(x.competitor)}</td><td dir="auto"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title||'فتح')}</a></td><td>${money(x.price)}</td><td><b style="color:${x.score>=0.75?'#16a34a':x.score>=0.5?'#d97706':'#dc2626'}">${Math.round(x.score*100)}%</b></td></tr>`).join('');
+}
+document.addEventListener('change', e => { const c = e.target.closest('[data-sg]'); if(c) compSug[+c.dataset.sg].on = c.checked; });
+$('#compSuggest').addEventListener('click', async () => {
+  if(!LIVE){ toast('الاقتراح التلقائي متاح داخل سلة فقط'); return; }
+  const top = ((state.view && state.view.cur && state.view.cur.top) || []).slice(0,20).map(p => p.name);
+  if(!top.length){ toast('لا توجد منتجات في الفترة المحددة'); return; }
+  const btn = $('#compSuggest'); btn.disabled = true; compSug = []; renderSug();
+  const have = new Set(((compData && compData.items) || []).map(x => x.product+'|'+x.competitor));
+  for(let i = 0; i < top.length; i++){
+    $('#compSuggestState').textContent = `جارٍ البحث… ${i+1}/${top.length}`;
+    try{
+      const r = await api('/api/competitors/suggest', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({product:top[i]})});
+      const best = {};   // أفضل مرشّح لكل منافس
+      (r.suggestions||[]).forEach(x => { if(x.score >= 0.4 && (!best[x.competitor] || x.score > best[x.competitor].score) && !have.has(top[i]+'|'+x.competitor)) best[x.competitor] = x; });
+      Object.values(best).forEach(x => compSug.push({...x, product:top[i], on:x.score>=0.75}));
+      renderSug();
+    }catch(err){ /* نتابع للمنتج التالي */ }
+  }
+  $('#compSuggestState').textContent = compSug.length ? `وُجد ${compSug.length} اقتراح؛ الخضراء (75%+) محدّدة مسبقاً، وراجع الباقي.` : 'لم أجد اقتراحات جديدة.';
+  btn.disabled = false;
+});
+$('#compSugApply').addEventListener('click', async () => {
+  const lines = compSug.filter(x => x.on).map(x => ({product:x.product, competitor:x.competitor, url:x.url}));
+  if(!lines.length){ toast('لم تحدد شيئاً'); return; }
+  try{ const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines, check:false})}); toast(`أُضيف ${r.added} للمراقبة`); compSug = compSug.filter(x => !x.on); renderSug(); }
+  catch(err){ toast('تعذّر الاعتماد'); }
+  loadComp(true);
 });
 $('#compSubmit').addEventListener('click', async () => {
   const lines = $('#compLines').value.split('\n').map(l => l.split(/\s*[|\t]\s*/)).filter(a => a.length>=3 && a[2].trim()).map(a => ({product:a[0].trim(), competitor:a[1].trim(), url:a[2].trim()}));

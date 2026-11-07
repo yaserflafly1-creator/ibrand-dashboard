@@ -37,3 +37,41 @@ test('checkCompetitorUrl: ok, HTTP errors, blocked, no price, network failure', 
   assert.match((await checkCompetitorUrl('https://a.com/p', async () => new Response('<meta http-equiv="refresh" content="0;url=\'https://a.com/\'">'))).err, /محوّلة/);
   assert.equal((await checkCompetitorUrl('https://a.com/p', async () => { throw new Error('x'); })).err, 'تعذّر الجلب');
 });
+
+import { matchScore, tokens, suggestFor } from '../src/suggest.js';
+
+test('matchScore: Arabic normalisation, units, numbers must agree', () => {
+  assert.equal(matchScore('سيميلاك جولد حليب الرضع (2) 800 جم', 'سيميلاك جولد حليب الرضع (2) 800 جم'), 1);
+  assert.ok(matchScore('سيميلاك جولد حليب الرضع (2) 800 جم', 'حليب سيميلاك جولد رقم 2 عبوة 800 جرام') >= 0.75);       // جرام = جم
+  assert.ok(matchScore('سيميلاك جولد حليب (2) 800 جم', 'سيميلاك جولد حليب رقم 2 عبوة 400 جرام') < 0.75);              // الحجم مختلف
+  assert.ok(matchScore('بيبي جوي مقاس 5 جامبو 80 حفاضة', 'بيبي جوي مقاس 3 صندوق جامبو 104 حفاضة') < 0.6);
+  assert.deepEqual(tokens('كريم (٢٥٠) مل'), ['كريم', '250', 'مل']);
+  assert.equal(matchScore('', 'x'), 0);
+});
+
+test('suggestFor: Shopify-style search + sitemap matching, scored by real page title; fetch failures are tolerated', async () => {
+  const prod = (title, price) => `<script type="application/ld+json">{"@type":"Product","name":"${title}","offers":{"price":${price}}}</script>`;
+  const kv = { m: new Map(), get: async (k) => kv.m.get(k) ?? null, put: async (k, v) => kv.m.set(k, v) };
+  const pages = {
+    'https://sidalih.com/products/a': prod('بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة', 95), 'https://sidalih.com/products/b': prod('بيبي جوي مقاس 3 صندوق جامبو 104 حفاضة', 96),
+    'https://pharmabrand.sa/ar/بيبي-جوي-مقاس-5-جامبو-80-حفاضة/p1': prod('حفاضات بيبي جوي مقاس 5 جامبو 80 حفاضة', 90)
+  };
+  const calls = [];
+  const f = async (u) => {
+    u = String(u); calls.push(u);
+    if (u.startsWith('https://sidalih.com/search')) return new Response('<a href="/products/a?_pos=1"></a><a href="/products/b"></a><a href="/products/a"></a>');
+    if (u === 'https://pharmabrand.sa/sitemap.xml') return new Response('<loc>https://pharmabrand.sa/ar/sitemap-1.xml</loc><loc>https://pharmabrand.sa/en/sitemap-1.xml</loc>');
+    if (u === 'https://pharmabrand.sa/ar/sitemap-1.xml') return new Response('<loc>https://pharmabrand.sa/ar/%D8%A8%D9%8A%D8%A8%D9%8A-%D8%AC%D9%88%D9%8A-%D9%85%D9%82%D8%A7%D8%B3-5-%D8%AC%D8%A7%D9%85%D8%A8%D9%88-80-%D8%AD%D9%81%D8%A7%D8%B6%D8%A9/p1</loc><loc>https://pharmabrand.sa/ar/صابون-ازرق/p2</loc>');
+    if (u === 'https://daralamirat.com.sa/sitemap.xml') throw new Error('down');
+    const key = decodeURI(u).replace('?_pos=1', ''); const hit = pages[u] || pages[key] || pages[u.replace(/\?.*/, '')];
+    return hit ? new Response(`<html>${hit}</html>`) : new Response('', { status: 404 });
+  };
+  const r = await suggestFor('بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة', { fetchFn: f, kv });
+  assert.equal(r[0].competitor, 'صيدلية كوم'); assert.equal(r[0].score, 1); assert.equal(r[0].price, 95);
+  assert.ok(r.some((x) => x.competitor === 'فارما براند' && x.score >= 0.75));
+  assert.ok(r.find((x) => x.url.endsWith('/b')).score < 0.75);              // نفس العلامة لكن مقاس/عدد مختلف
+  assert.ok(!r.some((x) => x.competitor === 'دار الأميرات'));                // موقع متعطل لا يكسر الباقي
+  assert.ok(kv.m.has('sm:فارما براند'));                                    // الخريطة تُخزَّن
+  const before = calls.length; await suggestFor('بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة', { fetchFn: f, kv });
+  assert.ok(!calls.slice(before).includes('https://pharmabrand.sa/sitemap.xml'));   // من التخزين لا من الشبكة
+});
