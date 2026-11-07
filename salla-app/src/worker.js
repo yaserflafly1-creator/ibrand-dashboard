@@ -621,7 +621,7 @@ async function addSuggestions(env, merchant, product, suggestions, existing, riv
 /* مهمة البحث عن المنافسين تعمل على الخادم (meta comp_job): تستمر ولو أغلق المستخدم الصفحة، ويدفعها الجدول المجدول كل 5 دقائق والمتصفح (إن كان مفتوحاً) بدفعات */
 const ownRivals = async (env, merchant) => makeRivalIndex((await catalogBlob(env.TOKENS, env.DB, merchant)).map((r) => r.name));   // أسماء منتجاتنا لاكتشاف المتشابهات
 const JOB = 'comp_job';
-const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, only: j.only || '', started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
+const jobView = (j) => (j ? { running: !j.done, total: j.queue.length, idx: j.idx, added: j.added, missed: j.missed, mode: j.mode, only: j.only || '', errors: j.errors || 0, lastErr: j.lastErr || '', found: j.found || 0, started: j.started } : { running: false, total: 0, idx: 0, added: 0, missed: 0, mode: '', started: 0 });
 async function startJob(env, merchant, n, mode, now = Date.now(), only = '') {
   const cur = await getMeta(env.DB, merchant, JOB, null);
   if (cur && !cur.done) return cur;                                                   // مهمة جارية: لا نبدأ ثانية
@@ -644,11 +644,11 @@ async function jobStep(env, merchant, batch) {
   await setMeta(env.DB, merchant, JOB, job);                                           // نحجز الدفعة قبل معالجتها كي لا يكررها تشغيل آخر
   const tokens = await loadTokens(env, merchant); if (!tokens) return job;
   const get = makeClient(env, merchant, tokens), existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor)), rivals = await ownRivals(env, merchant);
-  let added = 0, missed = 0;
+  let added = 0, missed = 0, errors = 0, found = 0, lastErr = '';
   for (const name of take) {
-    try { const n = await addSuggestions(env, merchant, name, await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }), existing, rivals, job.only ? 0.5 : COMP_KEEP); added += n; if (!n) missed++; } catch (e) { missed++; }
+    try { const sg = await suggestFor(name, { info: await ourInfo(get, name), kv: env.TOKENS, ...(job.only ? { sites: [job.only] } : {}) }); found += sg.length; const n = await addSuggestions(env, merchant, name, sg, existing, rivals, job.only ? 0.5 : COMP_KEEP); added += n; if (!n) missed++; } catch (e) { missed++; errors++; lastErr = String(e && e.message || e).slice(0, 120); }
   }
-  job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed;
+  job = (await getMeta(env.DB, merchant, JOB, null)) || job; job.added += added; job.missed += missed; job.errors = (job.errors || 0) + errors; job.found = (job.found || 0) + found; if (lastErr) job.lastErr = lastErr;
   await setMeta(env.DB, merchant, JOB, job);
   return job;
 }
