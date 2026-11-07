@@ -76,46 +76,75 @@ const zidProductsSearch = (host) => async (name, info, f) => {
 const MAPS = {
   'فارما براند': { root: 'https://pharmabrand.sa/sitemap.xml', child: /\/ar\//, url: /\/ar\/.+\/p\d+$/ },
   'دار الأميرات': { root: 'https://daralamirat.com.sa/sitemap.xml', child: /\/ar\//, url: /\/ar\/.+\/p\d+$/ },
-  'النهدي': { root: 'https://www.nahdionline.com/sitemap_index_ar.xml', child: /./, url: /\/pdp\/\d+$/, max: 9 },
+  'النهدي': { root: 'https://www.nahdionline.com/sitemap_index_ar.xml', child: /./, url: /\/pdp\/\d+$/, max: 9, titles: true },   // خريطتهم تحمل عنوان كل منتج بالعربية
   'ماي براند': { root: 'https://mybrand.com.sa/sitemap.xml', child: /sitemap-\d+\.xml$/, url: /\/p\d+$/ },
-  'صيدلية المتحدة': { root: 'https://unitedpharmacy.sa/sitemap_en.xml', direct: true, url: /\/en\/[^/]+\.html$/, toAr: true }
+  'صيدلية المتحدة': { root: 'https://unitedpharmacy.sa/sitemap_ar.xml', direct: true, url: /\/ar\/[^/]+\.html$/, titles: true }
 };
 const SEARCH = { 'صيدلية كوم': shopifySearch('sidalih.com'), 'اوت ليت العناية': zidProductsSearch('care-outlet.com') };
 export const SUGGEST_SITES = [...Object.keys(SEARCH), ...Object.keys(MAPS)];
 
-// ملفات خرائط المواقع قد تكون ضخمة (النهدي: 7 ملفات بحجم 23MB لكل منها، 64 ألف منتج): نحلّلها واحداً بعد الآخر ونخزّن المسارات فقط
+// ملفات خرائط المواقع قد تكون ضخمة (النهدي: 7 ملفات بحجم 23MB لكل منها، 64 ألف منتج): نحلّلها واحداً بعد الآخر ونخزّن المسارات والعناوين فقط
 const SM_MAX = 60_000_000;
-export async function sitemapUrls(kv, site, f) {
+const xmlDec = (t) => String(t || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+// يستخرج (رابط، عنوان المنتج) من كل <url>: العنوان من image:title أو PageMap name
+export function parseSitemap(xml, cfg) {
+  const urls = [], titles = [];
+  for (const m of String(xml).matchAll(/<url>([\s\S]*?)<\/url>/g)) {
+    const blk = m[1], loc = /<loc>\s*([^<\s]+)\s*<\/loc>/.exec(blk);
+    if (!loc) continue;
+    const u = xmlDec(loc[1]); if (!cfg.url.test(u)) continue;
+    const t = /<image:title>([^<]+)<\/image:title>/.exec(blk) || /Attribute name="name" value="([^"]+)"/.exec(blk);
+    if (cfg.titles && !t) continue;                       // صفحات بلا عنوان (تصنيفات) لا تهمنا
+    urls.push(u); titles.push(t ? xmlDec(t[1]) : '');
+  }
+  return { urls, titles };
+}
+export async function sitemapEntries(kv, site, f) {
   const cfg = MAPS[site], key = 'sm:' + site;
   const hit = kv && await kv.get(key);
-  if (hit) { try { const j = JSON.parse(hit); return Array.isArray(j) ? j : j.u.map((p) => j.o + p); } catch (e) { /* نعيد البناء */ } }
+  if (hit) { try { const j = JSON.parse(hit); if (Array.isArray(j)) return { urls: j, titles: null }; return { urls: j.u.map((p) => j.o + p), titles: j.t || null }; } catch (e) { /* نعيد البناء */ } }
   const root = locs(await getText(cfg.root, f, 60000, SM_MAX));
   const files = cfg.direct ? [cfg.root] : root.filter((u) => /\.xml/.test(u) && cfg.child.test(u)).slice(0, cfg.max || 6);
-  const out = []; let failed = 0;
+  const urls = [], titles = []; let failed = 0;
   for (const c of files) {
-    let list = cfg.direct ? root : locs(await getText(c, f, 60000, SM_MAX));
-    if (!list.length && !cfg.direct) { list = locs(await getText(c, f, 60000, SM_MAX)); if (!list.length) failed++; }   // إعادة محاولة واحدة لكل ملف
-    for (const u of list) if (cfg.url.test(u)) out.push(u);
+    let xml = await getText(c, f, 60000, SM_MAX);
+    if (!xml) { xml = await getText(c, f, 60000, SM_MAX); if (!xml) failed++; }   // إعادة محاولة واحدة لكل ملف
+    if (cfg.titles) { const r = parseSitemap(xml, cfg); urls.push(...r.urls); titles.push(...r.titles); }
+    else for (const u of locs(xml)) if (cfg.url.test(u)) { urls.push(u); titles.push(''); }
   }
-  if (kv && out.length && !failed) {   // لا نخزّن خريطة ناقصة (ملف تعثّر تحميله) كي لا تبقى أسبوعاً
-    const o = out[0].match(/^https?:\/\/[^/]+/)[0];
-    await kv.put(key, JSON.stringify({ o, u: out.map((u) => (u.startsWith(o) ? u.slice(o.length) : u)) }), { expirationTtl: 7 * 86400 });   // مسارات فقط (أسبوع)
+  if (kv && urls.length && !failed) {   // لا نخزّن خريطة ناقصة (ملف تعثّر تحميله) كي لا تبقى أسبوعاً
+    const o = urls[0].match(/^https?:\/\/[^/]+/)[0];
+    await kv.put(key, JSON.stringify({ o, u: urls.map((u) => (u.startsWith(o) ? u.slice(o.length) : u)), ...(cfg.titles ? { t: titles } : {}) }), { expirationTtl: 7 * 86400 });   // مسارات (وعناوين إن وُجدت) لأسبوع
   }
-  return out;
+  return { urls, titles: cfg.titles ? titles : null };
 }
-const memMaps = new WeakMap();   // قوائم الخرائط المحلّلة داخل الـ isolate لكل KV (تجنّب إعادة تحليل ملف كبير كل مرة)
-const mapUrls = async (kv, site, f) => {
+export const sitemapUrls = async (kv, site, f) => (await sitemapEntries(kv, site, f)).urls;
+
+const memMaps = new WeakMap();   // الخرائط المحلّلة داخل الـ isolate لكل KV (تجنّب إعادة تحليل ملف كبير كل مرة)
+const mapData = async (kv, site, f) => {
   const m = kv ? (memMaps.get(kv) || memMaps.set(kv, new Map()).get(kv)) : null, h = m && m.get(site);
-  if (h && h.exp > Date.now()) return h.urls;
-  const urls = await sitemapUrls(kv, site, f); if (m) m.set(site, { urls, exp: Date.now() + 600e3 }); return urls;
+  if (h && h.exp > Date.now()) return h.d;
+  const e = await sitemapEntries(kv, site, f);
+  const d = { urls: e.urls, titles: e.titles, norm: e.titles ? e.titles.map((t) => normText(t)) : null };
+  if (m) m.set(site, { d, exp: Date.now() + 600e3 }); return d;
 };
 const byMap = (site) => async (name, info, f, kv) => {
   const slug = info.slug ? info.slug.replace(/-/g, ' ') : '';
   const need = uniq([...tokens(name), ...tokens(slug)].filter((t) => !isNum(t) && t.length >= 3 && !GEN.has(t)));   // مرشّح سريع قبل التقييم (خريطة النهدي 64 ألف رابط)
-  const all = await mapUrls(kv, site, f);
-  const pool = need.length ? all.filter((u) => { const d = dec(u).toLowerCase(); return need.some((t) => d.includes(t)); }) : [];
-  return pool.map((u) => { const t = slugText(u); return { u, s: Math.max(matchScore(name, t), slug ? matchScore(slug, t) : 0) }; })
-    .filter((x) => x.s >= 0.34).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.u);
+  const d = await mapData(kv, site, f);
+  const out = [];
+  if (!need.length) return out;
+  for (let i = 0; i < d.urls.length; i++) {
+    const u = d.urls[i];
+    if (d.norm) {                                         // عنوان عربي في الخريطة: نطابق الاسم العربي مباشرةً
+      const nt = d.norm[i]; if (!need.some((t) => nt.includes(t))) continue;
+      const sc = matchScore(name, d.titles[i]); if (sc >= 0.34) out.push({ u, s: sc });
+    } else {
+      const dd = dec(u).toLowerCase(); if (!need.some((t) => dd.includes(t))) continue;
+      const t = slugText(u), sc = Math.max(matchScore(name, t), slug ? matchScore(slug, t) : 0); if (sc >= 0.34) out.push({ u, s: sc });
+    }
+  }
+  return out.sort((a, b) => b.s - a.s).slice(0, 8).map((x) => x.u);
 };
 const ENGLISH_SITES = ['النهدي', 'ماي براند', 'صيدلية المتحدة'];   // روابطها إنجليزية: نحتاج رابطاً/اسماً إنجليزياً لمنتجنا لنجد صفحتها
 const latinSlug = (u) => { const t = slugText(u); return /[a-z]{4,}/i.test(t) && !/[ء-ي]/.test(t) ? t.trim().toLowerCase().replace(/\s+/g, '-') : ''; };
@@ -145,7 +174,7 @@ async function runSites(name, info, barcode, sites, fetchFn, kv) {
     // رتّب المرشّحين بتشابه الرابط مع اسمنا (أو رابطنا الإنجليزي) ثم اجلب أفضل 6
     const slug = info.slug ? info.slug.replace(/-/g, ' ') : '';
     urls = urls.map((u) => ({ u, s: Math.max(matchScore(name, slugText(u)), slug ? matchScore(slug, slugText(u)) : 0) })).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.u);
-    const checked = await Promise.all(urls.map(async (u) => { const fu = MAPS[site]?.toAr ? u.replace('/en/', '/ar/') : u; let r = await checkCompetitorUrl(fu, fetchFn); if (!r.ok && fu !== u) r = await checkCompetitorUrl(u, fetchFn); return { u: fu, r }; }));
+    const checked = await Promise.all(urls.map(async (u) => { return { u, r: await checkCompetitorUrl(u, fetchFn) }; }));
     return checked.filter((x) => x.r.ok).map((x) => {
       const codes = x.r.codes || [], codeHit = barcode && codes.includes(barcode);
       let score = Math.max(matchScore(name, x.r.title), matchScore(name, slugText(x.u)) * 0.9);

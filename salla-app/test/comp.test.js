@@ -39,7 +39,7 @@ test('checkCompetitorUrl: ok, HTTP errors, blocked, no price, network failure', 
   assert.equal((await checkCompetitorUrl('https://a.com/p', async () => { throw new Error('x'); })).err, 'تعذّر الجلب');
 });
 
-import { matchScore, tokens, suggestFor, brandSlugFor, learnBrand } from '../src/suggest.js';
+import { matchScore, tokens, suggestFor, brandSlugFor, learnBrand, parseSitemap } from '../src/suggest.js';
 
 test('matchScore: Arabic normalisation, units, numbers must agree', () => {
   assert.equal(matchScore('سيميلاك جولد حليب الرضع (2) 800 جم', 'سيميلاك جولد حليب الرضع (2) 800 جم'), 1);
@@ -96,24 +96,36 @@ test('matchScore: rejects look-alikes from real review screenshots, accepts true
   for (const [a, b] of yes) assert.ok(matchScore(a, b) >= 0.75, `${a} <> ${b} = ${matchScore(a, b)}`);
 });
 
-test('suggestFor: learns bilingual brands from matched pages and uses them to find the product on English-slug sites (Nahdi)', async () => {
-  const prod = (title, price, brand) => `<html><script type="application/ld+json">{"@type":"Product","name":"${title}","brand":{"@type":"Brand","name":"${brand}"},"offers":{"price":${price}}}</script></html>`;
+test('suggestFor: English-slug sites (Mybrand) are found through the brand dictionary; Nahdi/United through Arabic titles in their sitemaps', async () => {
+  const prod = (title, price, brand = '277191') => `<html><script type="application/ld+json">{"@type":"Product","name":"${title}","brand":{"@type":"Brand","name":"${brand}"},"offers":{"price":${price}}}</script></html>`;
   const kv = { m: new Map(), get: async (k) => kv.m.get(k) ?? null, put: async (k, v) => kv.m.set(k, v) };
   const f = async (u) => {
     u = String(u);
-    if (u === 'https://pharmabrand.sa/sitemap.xml') return new Response('<loc>https://pharmabrand.sa/ar/sitemap-1.xml</loc>');
-    if (u === 'https://pharmabrand.sa/ar/sitemap-1.xml') return new Response('<loc>https://pharmabrand.sa/ar/%D8%AD%D9%84%D9%8A%D8%A8-%D8%B3%D9%8A%D9%85%D9%8A%D9%84%D8%A7%D9%83-%D9%85%D8%A7%D9%83%D8%B3-%D8%A8%D8%B1%D9%88-2-820-%D8%AC%D8%B1%D8%A7%D9%85/p1</loc>');
-    if (u.startsWith('https://pharmabrand.sa/ar/')) return new Response(prod('حليب سيميلاك ماكس برو رقم 2 عبوة 820 جرام', 170, 'سيميلاك| SIMILAC'));
+    if (u === 'https://mybrand.com.sa/sitemap.xml') return new Response('<loc>https://mybrand.com.sa/sitemap-2.xml</loc>');
+    if (u === 'https://mybrand.com.sa/sitemap-2.xml') return new Response('<loc>https://mybrand.com.sa/similac-gold-max-pro-milk-2-820-gm/p9</loc><loc>https://mybrand.com.sa/other-thing-5/p8</loc>');
+    if (u === 'https://mybrand.com.sa/similac-gold-max-pro-milk-2-820-gm/p9') return new Response(prod('حليب سيميلاك ماكس برو (2) 820 جم', 171));
     if (u === 'https://www.nahdionline.com/sitemap_index_ar.xml') return new Response('<loc>https://www.nahdionline.com/ar/sitemap1.xml</loc>');
-    if (u === 'https://www.nahdionline.com/ar/sitemap1.xml') return new Response('<loc>https://www.nahdionline.com/ar-sa/similac-gold-max-pro-stage-2-820-gm/pdp/111</loc><loc>https://www.nahdionline.com/ar-sa/similac-stage-3-820-gm/pdp/222</loc><loc>https://www.nahdionline.com/ar-sa/pampers-pants-4/pdp/333</loc>');
-    if (u.endsWith('/pdp/111')) return new Response(prod('سيميلاك حليب أطفال ماكس برو (2) 820 جم', 168, '277191'));
+    if (u === 'https://www.nahdionline.com/ar/sitemap1.xml') return new Response(`<urlset><url><loc>https://www.nahdionline.com/ar-sa/xyz-1/pdp/111</loc><image:image><image:title>سيميلاك حليب أطفال ماكس برو (2) 820 جم</image:title></image:image></url>
+      <url><loc>https://www.nahdionline.com/ar-sa/xyz-2/pdp/222</loc><PageMap><DataObject><Attribute name="name" value="سيميلاك مرحلة 3 820 جم &amp; اكثر"></Attribute></DataObject></PageMap></url>
+      <url><loc>https://www.nahdionline.com/ar-sa/no-title/pdp/333</loc></url></urlset>`);
+    if (u.endsWith('/pdp/111')) return new Response(prod('سيميلاك حليب أطفال ماكس برو (2) 820 جم', 168));
+    if (u === 'https://unitedpharmacy.sa/sitemap_ar.xml') return new Response('<urlset><url><loc>https://unitedpharmacy.sa/ar/similac-2.html</loc><image:image><image:title>سيميلاك ماكس برو (2) 820 جم</image:title></image:image></url><url><loc>https://unitedpharmacy.sa/ar/medication.html</loc></url></urlset>');
+    if (u === 'https://unitedpharmacy.sa/ar/similac-2.html') return new Response(prod('سيميلاك ماكس برو (2) 820 جم', 175));
     return new Response('', { status: 404 });
   };
   const name = 'سيميلاك حليب اطفال ماكس برو (2) 820 جم';
-  const r = await suggestFor(name, { info: {}, fetchFn: f, kv, sites: ['فارما براند', 'النهدي'] });   // بلا رابط إنجليزي من سلة
-  assert.ok(r.some((x) => x.competitor === 'فارما براند' && x.price === 170));
-  const nahdi = r.find((x) => x.competitor === 'النهدي'); assert.ok(nahdi && nahdi.price === 168 && nahdi.score >= 0.85);   // وُجدت بفضل العلامة المتعلَّمة similac
+  const r = await suggestFor(name, { info: {}, fetchFn: f, kv, sites: ['ماي براند', 'النهدي', 'صيدلية المتحدة'] });   // بلا رابط إنجليزي من سلة
+  assert.ok(r.some((x) => x.competitor === 'ماي براند' && x.price === 171 && x.score >= 0.85));     // قاموس العلامات: similac-milk-2-820
+  const nahdi = r.find((x) => x.competitor === 'النهدي'); assert.ok(nahdi && nahdi.price === 168 && nahdi.score >= 0.85);
+  assert.ok(r.some((x) => x.competitor === 'صيدلية المتحدة' && x.price === 175));
   assert.equal(brandSlugFor({ 'سيميلاك': 'similac' }, name), 'similac-milk-2-820');
+  const cached = JSON.parse(kv.m.get('sm:النهدي')); assert.equal(cached.u.length, 2); assert.equal(cached.t[1], 'سيميلاك مرحلة 3 820 جم & اكثر');   // العناوين تُخزَّن؛ صفحة بلا عنوان تُتجاهل
+});
+
+test('parseSitemap: titles from image:title or PageMap, entities decoded, non-matching urls dropped', () => {
+  const xml = '<url><loc>https://x.com/ar/a/pdp/1</loc><image:title>باجة &amp; لوز</image:title></url><url><loc>https://x.com/ar/b</loc><image:title>صفحة</image:title></url><url><loc>https://x.com/ar/c/pdp/3</loc></url>';
+  assert.deepEqual(parseSitemap(xml, { url: /\/pdp\/\d+$/, titles: true }), { urls: ['https://x.com/ar/a/pdp/1'], titles: ['باجة & لوز'] });
+  assert.deepEqual(parseSitemap(xml, { url: /\/pdp\/\d+$/ }).urls, ['https://x.com/ar/a/pdp/1', 'https://x.com/ar/c/pdp/3']);
 });
 
 test('learnBrand: bilingual brand strings only', () => {
