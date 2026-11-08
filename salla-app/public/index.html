@@ -2037,7 +2037,7 @@ async function copyText(text, inputEl){
 }
 const waLink = (url, label) => 'https://wa.me/?text=' + encodeURIComponent((label ? 'مرحباً '+label+'، ' : '') + 'هذا رابط لوحة مبيعات المتجر (للقراءة فقط): ' + url);
 const SHEET_REPORTS = [['summary','ملخص'],['daily','يومي'],['products','المنتجات'],['categories','التصنيفات'],['cancelled','الملغية']];
-const sheetBtns = id => `<div style="margin-top:6px;font-size:.78rem"><span style="color:var(--muted)">صيغ جوجل شيت (الشهر الحالي): </span>${SHEET_REPORTS.map(([r,t]) => `<button class="linkbtn" type="button" data-copy="${esc('=IMPORTDATA("'+location.origin+'/api/export.csv?share='+id+'&report='+r+'&period=month")')}">${t}</button>`).join(' · ')}</div>`;
+const sheetBtns = id => `<div style="margin-top:6px;font-size:.78rem"><span style="color:var(--muted)">صيغ جوجل شيت (الشهر الحالي): </span>${SHEET_REPORTS.map(([r,t]) => `<button class="linkbtn" type="button" data-copy="${esc('=IMPORTDATA("'+location.origin+'/api/export.csv?share='+id+'&report='+r+'&period=month")')}">${t}</button>`).join(' · ')} · <button class="linkbtn" type="button" title="أكثر 1000 صنف مبيعاً مع أكثر 1000 صنف إلغاءً، مدمجة بلا تكرار (آخر 90 يوماً)" data-copy="${esc('=IMPORTDATA("'+location.origin+'/api/export.csv?share='+id+'&report=stocktake&period=90d")')}">الجرد (90 يوماً)</button></div>`;
 const shDate = ms => new Date(ms).toLocaleDateString('en-GB');
 async function shareList(){
   const body = $('#shareDlgBody');

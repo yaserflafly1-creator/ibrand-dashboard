@@ -35,13 +35,34 @@ export function periodRange(period, today, from, to) {
   }
 }
 
-export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary'];
+export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary', 'stocktake'];
+
+/* قائمة الجرد: أكثر N صنف مبيعاً ∪ أكثر N صنف إلغاءً (دمج المكرر في سطر واحد).
+   من وقع في القائمتين فهو «مشكلة»: يُباع كثيراً ويُلغى كثيراً (غالباً رصيد نظام لا يطابق الرف) فيُجرد أولاً ويُعتمد رقم الجرد في تعديل الستوك. */
+export function stocktakeRows(rows, limit = 1000) {
+  const sold = {}, canc = {};
+  for (const d of rows) {
+    for (const k in d.prod || {}) sold[k] = (sold[k] || 0) + d.prod[k][0];
+    for (const k in (d.lost && d.lost.canceled && d.lost.canceled.prod) || {}) canc[k] = (canc[k] || 0) + d.lost.canceled.prod[k][0];
+  }
+  const rank = (m) => Object.entries(m).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, limit).map(([k], i) => [k, i + 1]);
+  const rs = new Map(rank(sold)), rc = new Map(rank(canc));
+  const names = [...new Set([...rs.keys(), ...rc.keys()])];
+  const list = names.map((n) => {
+    const q = sold[n] || 0, c = canc[n] || 0, both = rs.has(n) && rc.has(n);
+    return { n, q, c, both, onlyC: !rs.has(n), rs: rs.get(n) || '', rc: rc.get(n) || '', rate: q + c ? (c / (q + c)) * 100 : 0 };
+  });
+  list.sort((x, y) => (y.both - x.both) || (y.c - x.c) || (y.q - x.q));
+  return [['أولوية الجرد', 'الصنف', 'الحالة', 'القطع المباعة', 'ترتيب المبيعات', 'القطع الملغية', 'ترتيب الإلغاء', 'نسبة الإلغاء %', 'الكمية بعد الجرد', 'ملاحظات'],
+    ...list.map((x, i) => [i + 1, x.n, x.both ? 'مشكلة: مباع وملغى' : x.onlyC ? 'إلغاء فقط' : 'مبيعات فقط', x.q, x.rs, x.c, x.rc, pct(x.rate), '', ''])];
+}
 
 export function buildReport(report, rows, { catMap, vatMap } = {}) {
   if (report === 'daily') {
     return [['اليوم', 'الطلبات', 'المبيعات', 'متوسط الطلب', 'الملغية (عدد)', 'الملغية (قيمة)'],
       ...rows.map((d) => [d.day, d.valid, r2(d.revenue), d.valid ? r2(d.revenue / d.valid) : 0, d.canceled || 0, r2(d.lost?.canceled?.v)])];
   }
+  if (report === 'stocktake') return stocktakeRows(rows, 1000);
   const a = sumDays(rows, true, vatMap);
   if (report === 'products') {
     return [['المنتج', 'الكمية', 'المبيعات', 'الحصة %'], ...a.products.map((p) => [p.name, p.qty, r2(p.total), pct(p.share)])];

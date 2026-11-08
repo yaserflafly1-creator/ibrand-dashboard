@@ -1,3 +1,4 @@
+import { stocktakeRows } from '../src/export.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseProductPage, toNum, validCompetitorUrl, checkCompetitorUrl } from '../src/comp.js';
@@ -148,4 +149,15 @@ test('matchScore: a product-line word (ديو) on their side only makes it a dif
   assert.ok(matchScore('نان حليب أطفال رقم (1) 800 جم', 'نان ديو 1 800 جم') < 0.5);
   assert.ok(matchScore('نان حليب للأطفال ديو (1) 800 جم', 'نان ديو 1 800 جم') >= 0.85);
   assert.ok(matchScore('نان حليب أطفال رقم (1) 800 جم', 'نان حليب 1 800 جم') >= 0.6);
+});
+
+test('stocktakeRows: merges top sold and top canceled without duplicates; items in both lists are the problem list', () => {
+  const day = (prod, canc) => ({ day: '2026-11-01', prod, lost: { canceled: { prod: canc } } });
+  const rows = [day({ A: [50, 1, ''], B: [40, 1, ''], C: [30, 1, ''] }, { B: [9, 1, ''], D: [7, 1, ''] }), day({ A: [5, 1, ''] }, { A: [2, 1, ''] })];
+  const r = stocktakeRows(rows, 2);   // أعلى 2 مبيعاً: A,B · أعلى 2 إلغاءً: B,D
+  const names = r.slice(1).map((x) => x[1]);
+  assert.equal(new Set(names).size, names.length);
+  assert.deepEqual(names, ['B', 'D', 'A']);                 // B في القائمتين أولاً، ثم إلغاء فقط، ثم مبيعات فقط (C خارج القائمتين)
+  assert.equal(r[1][2], 'مشكلة: مباع وملغى'); assert.equal(r[2][2], 'إلغاء فقط'); assert.equal(r[3][2], 'مبيعات فقط');
+  assert.equal(r[1][3], 40); assert.equal(r[1][5], 9);
 });
