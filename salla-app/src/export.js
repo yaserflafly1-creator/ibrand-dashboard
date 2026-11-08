@@ -1,3 +1,4 @@
+import { normText } from './suggest.js';
 // تقارير CSV لربط جوجل شيت (IMPORTDATA): إجماليات فقط، بلا أسماء عملاء ولا تفاصيل طلبات.
 import { sumDays, categoryStats } from './agg.js';
 
@@ -39,7 +40,7 @@ export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary
 
 /* قائمة الجرد: أكثر N صنف مبيعاً ∪ أكثر N صنف إلغاءً (دمج المكرر في سطر واحد).
    من وقع في القائمتين فهو «مشكلة»: يُباع كثيراً ويُلغى كثيراً (غالباً رصيد نظام لا يطابق الرف) فيُجرد أولاً ويُعتمد رقم الجرد في تعديل الستوك. */
-const nk = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+const nk = (x) => normText(x);
 export function stocktakeRows(rows, limit = 1000, codes = null) {
   const sold = {}, canc = {};
   for (const d of rows) {
