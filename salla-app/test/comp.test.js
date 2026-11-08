@@ -158,6 +158,8 @@ test('stocktakeRows: merges top sold and top canceled without duplicates; items 
   const names = r.slice(1).map((x) => x[1]);
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(names, ['B', 'D', 'A']);                 // B في القائمتين أولاً، ثم إلغاء فقط، ثم مبيعات فقط (C خارج القائمتين)
-  assert.equal(r[1][2], 'مشكلة: مباع وملغى'); assert.equal(r[2][2], 'إلغاء فقط'); assert.equal(r[3][2], 'مبيعات فقط');
-  assert.equal(r[1][3], 40); assert.equal(r[1][5], 9);
+  assert.equal(r[1][4], 'مشكلة: مباع وملغى'); assert.equal(r[2][4], 'إلغاء فقط'); assert.equal(r[3][4], 'مبيعات فقط');
+  assert.equal(r[1][5], 40); assert.equal(r[1][7], 9);
+  const rc = stocktakeRows(rows, 2, new Map([['B', { sku: '628', id: '77' }]]));
+  assert.deepEqual([rc[0][2], rc[0][3], rc[1][2], rc[1][3], rc[2][2]], ['الباركود', 'الكود الداخلي', '628', '77', '']);
 });

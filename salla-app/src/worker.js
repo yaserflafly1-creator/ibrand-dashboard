@@ -199,6 +199,20 @@ const ORDERS_EXPORT_MAX_DAYS = 31, ORDERS_EXPORT_MAX_PAGES = 300;
 const UNAVAILABLE_RE = /عدم\s*توفر|غير\s*متوفر|نفد|نفاد/;   // سبب الإلغاء تكتبه الفروع كملاحظة في سجل الطلب (مثل «عدم توفر المنتج»)
 const UNAVAIL_MAX_PAGES = 150, UNAVAIL_MAX_ORDERS = 700;      // سقف نداءات سلة في الطلب الواحد (حد النداءات الفرعية 1000)
 const pool = async (items, n, fn) => { const out = []; for (let i = 0; i < items.length; i += n) out.push(...await Promise.all(items.slice(i, i + n).map(fn))); return out; };
+// الباركود (sku) والكود الداخلي (معرّف المنتج في سلة) لكل منتج بالاسم: صفحات /products الخفيفة، تُحفظ 6 ساعات في KV
+async function productCodes(env, merchant) {
+  const key = `codes:${merchant}`, nk = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const raw = await env.TOKENS.get(key);
+  if (raw) { try { return new Map(JSON.parse(raw).map(([n, sku, id]) => [n, { sku, id }])); } catch (e) { /* نعيد الجلب */ } }
+  const tokens = await loadTokens(env, merchant); if (!tokens) return new Map();
+  const get = makeClient(env, merchant, tokens), map = new Map();
+  const take = (j) => { for (const p of j.data || []) { const n = nk(p.name); if (n && !map.has(n)) map.set(n, { sku: String(p.sku || p.gtin || ''), id: String(p.id || '') }); } };
+  const first = await get('/products', { format: 'light', per_page: 30, page: 1 }); take(first);
+  const pages = Math.min(first.pagination?.totalPages || 1, 200);
+  for (let pg = 2; pg <= pages; pg += 8) (await Promise.all(Array.from({ length: Math.min(8, pages - pg + 1) }, (_, k) => get('/products', { format: 'light', per_page: 30, page: pg + k }).catch(() => ({}))))).forEach(take);
+  await env.TOKENS.put(key, JSON.stringify([...map].map(([n, v]) => [n, v.sku, v.id])), { expirationTtl: 6 * 3600 });
+  return map;
+}
 async function handleExport(req, env) {
   const q = new URL(req.url).searchParams;
   const rec = await shareById(env, q.get('share'));
@@ -275,7 +289,8 @@ async function handleExport(req, env) {
     await ensureSchema(env.DB);
     const rows = await rangeRows(env.DB, rec.merchant, from, to);
     const cat = (report === 'categories' || report === 'products') ? await catInfo(env, rec.merchant) : null;
-    return '\uFEFF' + toCsv(buildReport(report, rows, { catMap: cat?.cats, vatMap: cat?.vat }));
+    const codes = report === 'stocktake' ? await productCodes(env, rec.merchant).catch(() => new Map()) : null;
+    return '\uFEFF' + toCsv(buildReport(report, rows, { catMap: cat?.cats, vatMap: cat?.vat, codes }));
   });
   return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
 }

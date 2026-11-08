@@ -39,7 +39,8 @@ export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary
 
 /* قائمة الجرد: أكثر N صنف مبيعاً ∪ أكثر N صنف إلغاءً (دمج المكرر في سطر واحد).
    من وقع في القائمتين فهو «مشكلة»: يُباع كثيراً ويُلغى كثيراً (غالباً رصيد نظام لا يطابق الرف) فيُجرد أولاً ويُعتمد رقم الجرد في تعديل الستوك. */
-export function stocktakeRows(rows, limit = 1000) {
+const nk = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+export function stocktakeRows(rows, limit = 1000, codes = null) {
   const sold = {}, canc = {};
   for (const d of rows) {
     for (const k in d.prod || {}) sold[k] = (sold[k] || 0) + d.prod[k][0];
@@ -53,16 +54,16 @@ export function stocktakeRows(rows, limit = 1000) {
     return { n, q, c, both, onlyC: !rs.has(n), rs: rs.get(n) || '', rc: rc.get(n) || '', rate: q + c ? (c / (q + c)) * 100 : 0 };
   });
   list.sort((x, y) => (y.both - x.both) || (y.c - x.c) || (y.q - x.q));
-  return [['أولوية الجرد', 'الصنف', 'الحالة', 'القطع المباعة', 'ترتيب المبيعات', 'القطع الملغية', 'ترتيب الإلغاء', 'نسبة الإلغاء %', 'الكمية بعد الجرد', 'ملاحظات'],
-    ...list.map((x, i) => [i + 1, x.n, x.both ? 'مشكلة: مباع وملغى' : x.onlyC ? 'إلغاء فقط' : 'مبيعات فقط', x.q, x.rs, x.c, x.rc, pct(x.rate), '', ''])];
+  return [['أولوية الجرد', 'الصنف', 'الباركود', 'الكود الداخلي', 'الحالة', 'القطع المباعة', 'ترتيب المبيعات', 'القطع الملغية', 'ترتيب الإلغاء', 'نسبة الإلغاء %', 'الكمية بعد الجرد', 'ملاحظات'],
+    ...list.map((x, i) => [i + 1, x.n, (codes && codes.get(nk(x.n)) || {}).sku || '', (codes && codes.get(nk(x.n)) || {}).id || '', x.both ? 'مشكلة: مباع وملغى' : x.onlyC ? 'إلغاء فقط' : 'مبيعات فقط', x.q, x.rs, x.c, x.rc, pct(x.rate), '', ''])];
 }
 
-export function buildReport(report, rows, { catMap, vatMap } = {}) {
+export function buildReport(report, rows, { catMap, vatMap, codes } = {}) {
   if (report === 'daily') {
     return [['اليوم', 'الطلبات', 'المبيعات', 'متوسط الطلب', 'الملغية (عدد)', 'الملغية (قيمة)'],
       ...rows.map((d) => [d.day, d.valid, r2(d.revenue), d.valid ? r2(d.revenue / d.valid) : 0, d.canceled || 0, r2(d.lost?.canceled?.v)])];
   }
-  if (report === 'stocktake') return stocktakeRows(rows, 1000);
+  if (report === 'stocktake') return stocktakeRows(rows, 1000, codes);
   const a = sumDays(rows, true, vatMap);
   if (report === 'products') {
     return [['المنتج', 'الكمية', 'المبيعات', 'الحصة %'], ...a.products.map((p) => [p.name, p.qty, r2(p.total), pct(p.share)])];
