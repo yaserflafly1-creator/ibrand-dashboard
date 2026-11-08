@@ -2065,7 +2065,9 @@ async function shareList(){
   $('#shClose').onclick = () => $('#shareDlg').close();
   body.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
     const inp = b.parentElement.querySelector('input[readonly]');
-    toast(await copyText(b.dataset.copy, inp) ? 'تم نسخ الرابط ✓' : 'حدّدتُ الرابط لك، اضغط مطولاً ثم «نسخ»');
+    const ok = await copyText(b.dataset.copy, inp), t0 = b.textContent;
+    toast(ok ? 'تم نسخ الرابط ✓' : 'حدّدتُ الرابط لك، اضغط مطولاً ثم «نسخ»');
+    b.textContent = ok ? 'تم النسخ ✓' : 'تعذّر النسخ'; setTimeout(() => { b.textContent = t0; }, 1800);   // الإشعار العلوي يختفي خلف النافذة المنبثقة، فنُظهر النتيجة على الزر نفسه
   });
   body.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { try{ await api('/api/share?id='+b.dataset.del, {method:'DELETE'}); }catch(e){} shareList(); });
 }
