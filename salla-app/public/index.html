@@ -1160,7 +1160,7 @@ const matchCell = x => { const v = x.verified ? ' <span title="تم التحقق
 const matchOk = x => { const m = $('#compMatch').value; if(!m) return true; const v = x.matchby==='barcode' || x.verified ? 1 : (x.score||0); return m==='hi' ? v>=0.8 : m==='mid' ? v>=0.5 && v<0.8 : v<0.5; };
 function renderComp(){
   if(!$('#compPanel') || !compData) return;
-  if(SHARE){ const add = $('#compAdd'); if(add) add.hidden = true; const cl = $('#compClean'); if(cl) cl.hidden = true; }   // الإدارة (رابط المشاركة): قراءة فقط
+  if(SHARE){ const add = $('#compAdd'); if(add) add.hidden = true; const cl = $('#compClean'); if(cl) cl.hidden = true; const ig = document.querySelector('#compMode [data-m="ign"]'); if(ig) ig.hidden = true; }   // الإدارة (رابط المشاركة): قراءة فقط
   const all = compData.items, live = all.filter(x => !x.ignored);
   const sel = $('#compFilter'), cur = sel.value, names = [...new Set(all.map(x => x.competitor))];
   sel.innerHTML = '<option value="">كل المنافسين</option>' + names.map(n => `<option${n===cur?' selected':''}>${esc(n)}</option>`).join('');
