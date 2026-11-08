@@ -166,6 +166,7 @@ test('export.csv: share-gated aggregate CSV reports for Google Sheets', async ()
   const buf = new Uint8Array(await d.arrayBuffer()), t = new TextDecoder().decode(buf);
   assert.ok(t.includes('2026-10-10,1,100')); assert.deepEqual([...buf.slice(0, 3)], [0xef, 0xbb, 0xbf]);   // BOM لعرض العربية صحيحاً
   for (const r of ['summary', 'products', 'categories', 'cancelled']) assert.equal((await call(url(r), {}, {})).status, 200);
+  const st = await call(url('stocktake'), {}, {}); assert.equal(st.status, 200); assert.ok((await st.text()).includes('أولوية الجرد'));
   assert.equal((await call('/api/export.csv?report=daily', {}, {})).status, 401);
   assert.equal((await call(`/api/export.csv?share=${'0'.repeat(32)}&report=daily`, {}, {})).status, 401);
   assert.equal((await call(url('nope'), {}, {})).status, 400);
