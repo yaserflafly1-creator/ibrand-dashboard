@@ -647,8 +647,8 @@ async function startJob(env, merchant, n, mode, now = Date.now(), only = '') {
   const cur = await getMeta(env.DB, merchant, JOB, null);
   if (cur && !cur.done) return cur;                                                   // مهمة جارية: لا نبدأ ثانية
   const today = riyadhDay(now), rows = await rangeRows(env.DB, merchant, addDays(today, -30), today);
-  let queue = sumDays(rows, true, null).products.slice(0, Math.min(only ? 2000 : 500, Math.max(1, n))).map((p) => p.name);
-  const want = Math.min(only ? 2000 : 500, Math.max(1, n));
+  let queue = sumDays(rows, true, null).products.slice(0, Math.min(2000, Math.max(1, n))).map((p) => p.name);
+  const want = Math.min(2000, Math.max(1, n));
   if (queue.length < want) {                                                         // مبيعات آخر 30 يوماً أقل من المطلوب: نكمل من كتالوجنا (بعد الأكثر مبيعاً)
     const have = new Set(queue);
     for (const r of await catalogBlob(env.TOKENS, env.DB, merchant)) { if (queue.length >= want) break; if (r.name && !have.has(r.name)) { have.add(r.name); queue.push(r.name); } }

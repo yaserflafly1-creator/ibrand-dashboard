@@ -405,7 +405,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
 
 
   <section data-tab="comp" class="card panel sec" id="compPanel">
-    <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="compClean" type="button" title="يستبعد المطابقات غير المتحقق منها التي تخص منتجاً آخر عندنا (مثل نان ≠ نان ديو)">فحص التعارضات</button><button class="btn" id="compRefresh" type="button">تحديث</button></div></div>
+    <div class="panel-h"><div><h2>تحليل المنافسين</h2><p id="compSub">أسعارنا (شاملة الضريبة) مقابل أسعار المنافسين · يُفحص كل رابط مرة يومياً · بيانات سرية: داخل سلة فقط</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="compClean" type="button" title="يستبعد المطابقات غير المتحقق منها التي تخص منتجاً آخر عندنا (مثل نان ≠ نان ديو)">فحص التعارضات</button><button class="btn" id="compXls" type="button" title="يُنزّل الصفوف المعروضة حالياً (بحسب الفلاتر) كملف يفتح في إكسل">تنزيل Excel</button><button class="btn" id="compRefresh" type="button">تحديث</button></div></div>
     <div class="mini-kpis" id="compKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div id="compByComp" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px"></div>
     <div class="buy-tools">
@@ -1157,6 +1157,7 @@ async function loadComp(force){
 }
 const matchCell = x => { const v = x.verified ? ' <span title="تم التحقق" style="color:#16a34a">✓</span>' : '';
   return x.matchby==='barcode' ? `<b style="color:#16a34a">باركود</b>${v}` : x.matchby==='name' ? `<b style="color:${x.score>=0.85?'#16a34a':'#d97706'}">اسم ${Math.round((x.score||0)*100)}%</b>${v}` : `<span style="color:var(--muted)">يدوي</span>${v}`; };
+let compShown = [];
 const matchOk = x => { const m = $('#compMatch').value; if(!m) return true; const v = x.matchby==='barcode' || x.verified ? 1 : (x.score||0); return m==='hi' ? v>=0.8 : m==='mid' ? v>=0.5 && v<0.8 : v<0.5; };
 function renderComp(){
   if(!$('#compPanel') || !compData) return;
@@ -1173,6 +1174,7 @@ function renderComp(){
     matchOk(x) && (compMode==='all' ? !x.ignored : compMode==='ign' ? !!x.ignored : (compMode==='exp' && !x.ignored && x.diffPct!=null && x.diffPct>2) || (compMode==='chp' && !x.ignored && x.diffPct!=null && x.diffPct<-2) || (compMode==='unv' && !x.ignored && !x.verified) || (compMode==='err' && x.err)));
   const so = $('#compSort').value, dv = x => x.diffPct==null ? -1e9 : x.diffPct, mv = x => x.matchby==='barcode' || x.verified ? 2 : (x.score||0);
   rows.sort(so==='cheap' ? (a,b) => (a.diffPct==null ? 1e9 : a.diffPct) - (b.diffPct==null ? 1e9 : b.diffPct) : so==='match' ? (a,b) => mv(b)-mv(a) : so==='name' ? (a,b) => a.product.localeCompare(b.product,'ar') : (a,b) => dv(b)-dv(a));
+  compShown = rows;
   $('#compCount').textContent = `المعروض: ${fmt(rows.length)} صف`;
   $('#compRows').innerHTML = rows.length ? rows.map(x => {
     const d = x.diffPct, dcell = d==null ? '—' : `<b style="color:${d>2?'#dc2626':d<-2?'#16a34a':'inherit'}">${d>0?'▲ +':d<0?'▼ ':''}${d.toFixed(1)}%</b>`;
@@ -1192,6 +1194,15 @@ document.addEventListener('click', async e => {
   loadComp(true);
 });
 $('#compRefresh').addEventListener('click', () => loadComp(true));
+$('#compXls').addEventListener('click', () => {
+  if(!compShown.length){ toast('لا توجد صفوف لتنزيلها'); return; }
+  const cell = v => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const head = ['المنتج','المنافس','سعرنا (شامل الضريبة)','سعرهم','الفرق %','الحالة','نوع المطابقة','نسبة التطابق %','تم التحقق','مستبعد','الرابط','آخر فحص'];
+  const body = compShown.map(x => [x.product, x.competitor, x.ourPrice ?? '', x.price ?? '', x.diffPct==null ? '' : Math.round(x.diffPct*10)/10, x.err ? x.err : x.avail===0 ? 'غير متوفر عندهم' : x.avail===1 ? 'متوفر' : '', x.matchby==='barcode' ? 'باركود' : x.matchby==='name' ? 'اسم' : 'يدوي', x.matchby==='barcode' ? 100 : Math.round((x.score||0)*100), x.verified ? 'نعم' : 'لا', x.ignored ? 'نعم' : 'لا', x.url, x.checked ? new Date(x.checked).toLocaleString('en-GB') : '']);
+  const blob = new Blob(['\uFEFF' + [head, ...body].map(r => r.map(cell).join(',')).join('\r\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `competitors-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
 $('#compClean').addEventListener('click', async () => { if(!LIVE){ toast('متاح داخل سلة فقط'); return; } try{ const r = await api('/api/competitors/clean', {method:'POST', headers:{'content-type':'application/json'}, body:'{}'}); toast(r.ignored ? `استُبعدت ${r.ignored} مطابقة تخص منتجاً آخر عندنا` : 'لا توجد مطابقات متعارضة'); }catch(err){ toast('تعذّر الفحص'); } loadComp(true); });
 $('#compFilter').addEventListener('change', renderComp); $('#compMatch').addEventListener('change', renderComp); $('#compSort').addEventListener('change', renderComp);
 $('#compByComp').addEventListener('click', e => { const b = e.target.closest('[data-cc]'); if(!b) return; $('#compFilter').value = $('#compFilter').value===b.dataset.cc ? '' : b.dataset.cc; renderComp(); });
