@@ -1,7 +1,7 @@
 import { normalizeOrder, normalizeCoupon, normalizeShipment, mapStatus } from './salla.js';
 import { sumDays, seriesOf, categoryStats, sumBaskets } from './agg.js';
 import { ensureSchema, getMeta, setMeta, rangeRows, coverage, readInventory, campaignStats, customerStats, customerTotal, readCatalog, basketRows, monthlyStats, rangeTotals } from './db.js';
-import { suggestFor, matchScore, normText, makeRivalIndex, rivalOf } from './suggest.js';
+import { suggestFor, SUGGEST_SITES, matchScore, normText, makeRivalIndex, rivalOf } from './suggest.js';
 import { compList, compUpsert, compDelete, compIgnore, compVerify, compOne, compDue, compSave, validCompetitorUrl, checkCompetitorUrl } from './comp.js';
 import { toCsv, periodRange, buildReport, REPORTS } from './export.js';
 import { syncMerchant, priceMap, priceLines, catalogBlob, addDays, riyadhDay, CAMPAIGN_DAYS_DEFAULT } from './sync.js';
@@ -681,6 +681,7 @@ async function compWeekly(env, merchant, now) {
   const j = await getMeta(env.DB, merchant, JOB, null);
   if (j && !j.done) await jobStep(env, merchant, Number(env.COMP_BATCH) || 8);
 }
+const SUGGEST_SITES_ALL = SUGGEST_SITES;
 async function handleCompetitors(req, env) {
   const u = new URL(req.url), sub = u.pathname.slice('/api/competitors'.length);
   // القراءة (GET) متاحة لرابط المشاركة (الإدارة تشاهد الروابط والمقارنات فقط)؛ الإضافة والبحث والفحص والتحقق والحذف بتوكن سلة فقط
@@ -707,6 +708,22 @@ async function handleCompetitors(req, env) {
   if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
+  if (sub === '/add-one') {   // اسم منتجنا أو باركوده (أحدهما كافٍ): نجد المنتج عندنا ثم نبحث عنه عند المنافس المحدد (أو كلهم) ونضيف أفضل مطابقة
+    const tokens = await loadTokens(env, merchant); if (!tokens) return json({ error: 'no token' }, 401);
+    const get = makeClient(env, merchant, tokens), code = String(b.code || '').replace(/\D/g, '');
+    let name = String(b.product || '').trim().slice(0, 200), info = {};
+    if (!name && code.length >= 8) {
+      try { const j = await get('/products', { keyword: code, per_page: 5, format: 'light' }); const p = (j.data || []).find((x) => String(x.sku || x.gtin || '').replace(/\D/g, '') === code); if (p) name = String(p.name || ''); } catch (e) { /* لا شيء */ }
+      if (!name) return json({ ok: false, reason: 'لا يوجد منتج بهذا الباركود عندنا' });
+    }
+    if (!name) return json({ ok: false, reason: 'اكتب اسم المنتج أو الباركود' });
+    info = await ourInfo(get, name); if (code && !info.barcode) info.barcode = code;
+    const sites = SUGGEST_SITES_ALL.includes(String(b.competitor || '').trim()) ? [String(b.competitor).trim()] : undefined;
+    const sg = await suggestFor(name, { info, kv: env.TOKENS, ...(sites ? { sites } : {}) });
+    const existing = new Set((await compList(env.DB, merchant)).map((r) => r.product + '|' + r.competitor));
+    const n = await addSuggestions(env, merchant, name, sg, existing, null, 0.4);
+    return json({ ok: n > 0, product: name, added: n, barcode: info.barcode || '', reason: n ? '' : (sg.length ? 'وُجد مرشحون لكن نسبة تطابقهم أقل من 40% أو مسجّلون سابقاً' : 'لم يُعثر عليه عند المنافس'), best: sg.sort((x, y) => y.score - x.score)[0] ? { title: sg[0].title, score: sg[0].score } : null });
+  }
   if (sub === '/from-url') {   // رابط منتج منافس وحده: نقرأ الصفحة ونطابق عنوانها مع منتجات كتالوجنا ونضيف أفضل مطابقة
     const url = validCompetitorUrl(b.url || ''); if (!url) return json({ error: 'bad url' }, 400);
     const host = new URL(url).hostname.replace(/^www\./, ''), SITE = { 'nahdionline.com': 'النهدي', 'unitedpharmacy.sa': 'صيدلية المتحدة', 'pharmabrand.sa': 'فارما براند', 'mybrand.com.sa': 'ماي براند', 'sidalih.com': 'صيدلية كوم', 'daralamirat.com.sa': 'دار الأميرات', 'care-outlet.com': 'اوت ليت العناية' };

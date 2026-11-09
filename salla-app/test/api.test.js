@@ -422,3 +422,25 @@ test('competitors /from-url: a lone competitor URL is read, matched to our catal
   const items = (await (await get(env, '/api/competitors')).json()).items;
   assert.equal(items.length, 1); assert.equal(items[0].price, 89);
 });
+
+test('competitors /add-one: a lone barcode or a lone name finds our product and adds the competitor match (barcode = verified)', async () => {
+  const env = mkEnv(); const code = '6281008298482', name = 'بيبي جوي مقاس (5) صندوق جامبو 80 حفاضة';
+  const page = `<script type="application/ld+json">{"@type":"Product","name":"${name}","sku":"${code}","offers":{"price":95.72,"availability":"https://schema.org/InStock"}}</script>`;
+  mockFetch(good, { '/products': () => ok([{ name, sku: code, mpn: null, metadata: { url: 'baby-joy-size-5-box-jumbo-80-diaper' } }]) });
+  const base = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://sidalih.com/search')) return new Response('<a href="/products/baby-joy-5"></a>');
+    if (u === 'https://sidalih.com/products/baby-joy-5') return new Response(`<html>${page}</html>`);
+    if (u.startsWith('https://api.test') || u.startsWith('https://i.test')) return base(url, init);
+    return new Response('', { status: 404 });
+  };
+  await ensureSchema(env.DB);
+  const post = (body) => worker.fetch(new Request('https://x.test/api/competitors/add-one', { method: 'POST', body: JSON.stringify(body), headers: auth.headers }), env);
+  const a = await (await post({ code, competitor: 'صيدلية كوم' })).json();
+  assert.equal(a.ok, true); assert.equal(a.product, name); assert.equal(a.added, 1);
+  const items = (await (await get(env, '/api/competitors')).json()).items;
+  assert.equal(items.length, 1); assert.equal(items[0].matchby, 'barcode'); assert.equal(items[0].verified, 1);
+  assert.equal((await (await post({ code: '1234567890123', competitor: 'صيدلية كوم' })).json()).ok, false);   // باركود غير موجود عندنا
+  assert.equal((await (await post({ product: name, competitor: 'صيدلية كوم' })).json()).added, 0);          // اسم: مسجّل سابقاً فلا يتكرر
+});
