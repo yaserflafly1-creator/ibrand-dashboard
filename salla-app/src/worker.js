@@ -707,6 +707,21 @@ async function handleCompetitors(req, env) {
   if (sub === '/verify') { await compVerify(env.DB, merchant, Number(b.id) || 0, !!b.on); return json({ ok: true }); }
   if (sub === '/ignore') { await compIgnore(env.DB, merchant, Number(b.id) || 0, !!b.ignored); return json({ ok: true }); }
   if (sub === '/check') return json(await checkComp(env, merchant, Number(b.id) || 0));
+  if (sub === '/from-url') {   // رابط منتج منافس وحده: نقرأ الصفحة ونطابق عنوانها مع منتجات كتالوجنا ونضيف أفضل مطابقة
+    const url = validCompetitorUrl(b.url || ''); if (!url) return json({ error: 'bad url' }, 400);
+    const host = new URL(url).hostname.replace(/^www\./, ''), SITE = { 'nahdionline.com': 'النهدي', 'unitedpharmacy.sa': 'صيدلية المتحدة', 'pharmabrand.sa': 'فارما براند', 'mybrand.com.sa': 'ماي براند', 'sidalih.com': 'صيدلية كوم', 'daralamirat.com.sa': 'دار الأميرات', 'care-outlet.com': 'اوت ليت العناية' };
+    const competitor = Object.entries(SITE).find(([h]) => host === h || host.endsWith('.' + h))?.[1];
+    if (!competitor) return json({ error: 'unsupported', reason: 'موقع غير مدعوم: ' + host });
+    const page = await checkCompetitorUrl(url);
+    if (!page.ok) return json({ error: 'fetch', reason: page.err });
+    const rows = await catalogBlob(env.TOKENS, env.DB, merchant);
+    const ranked = rows.map((r) => ({ name: r.name, score: matchScore(r.name, page.title || '') })).sort((x, y) => y.score - x.score).slice(0, 3);
+    const best = ranked[0];
+    if (!best || best.score < 0.3) return json({ error: 'nomatch', title: page.title || '', competitor, candidates: ranked });
+    const id = await compUpsert(env.DB, merchant, { product: best.name, competitor, url, matchby: 'name', score: best.score, verified: 0, code: (page.codes || []).find((c) => /^\d{12,14}$/.test(c)) || '' });
+    await compSave(env.DB, merchant, id, { ok: true, price: page.price, currency: 'SAR', avail: page.avail, title: page.title }, Date.now(), riyadhDay(Date.now()));
+    return json({ ok: true, product: best.name, competitor, score: best.score, title: page.title || '', candidates: ranked });
+  }
   if (sub === '/suggest') {   // مرشّحون من مواقع المنافسين (بالباركود ثم الاسم)
     const name = String(b.product || '').trim().slice(0, 200), tokens = await loadTokens(env, merchant);
     const info = name && tokens ? await ourInfo(makeClient(env, merchant, tokens), name) : {};

@@ -1238,14 +1238,21 @@ $('#compSuggest').addEventListener('click', async () => {
 });
 $('#compStop').addEventListener('click', async () => { try{ await api('/api/competitors/job', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({stop:true})}); $('#compJobBar').textContent = 'أُوقفت المهمة.'; }catch(err){ toast('تعذّر الإيقاف'); } });
 $('#compSubmit').addEventListener('click', async () => {
-  const raw = $('#compLines').value.split('\n').map(l => l.split(/\s*[|\t]\s*/)).filter(a => a.length >= 2 && a[0].trim() && a[1].trim());
-  if(!raw.length){ toast('اكتب أسطراً بالشكل: المنتج | المنافس | الرابط (اختياري)'); return; }
+  const rows0 = $('#compLines').value.split('\n').map(l => l.trim()).filter(Boolean), urlOnly = rows0.filter(l => /^https?:\/\/\S+$/i.test(l));
+  const raw = rows0.filter(l => !urlOnly.includes(l)).map(l => l.split(/\s*[|\t]\s*/)).filter(a => a.length >= 2 && a[0].trim() && a[1].trim());
+  if(!raw.length && !urlOnly.length){ toast('اكتب أسطراً بالشكل: المنتج | المنافس | الرابط (اختياري)'); return; }
   if(!LIVE){ toast('الإضافة متاحة داخل سلة فقط'); return; }
   const withUrl = raw.filter(a => a[2] && a[2].trim()).map(a => ({product:a[0].trim(), competitor:a[1].trim(), url:a[2].trim()}));
   const noUrl = raw.filter(a => !(a[2] && a[2].trim())).map(a => ({product:a[0].trim(), competitor:a[1].trim()}));
   const btn = $('#compSubmit'), st = $('#compSubmitState'); btn.disabled = true;
   let added = 0; const notFound = [], rejected = [];
+  const urlRes = [];
   try{
+    for(let i = 0; i < urlOnly.length; i++){   // رابط وحده: نطابقه مع منتجاتنا تلقائياً
+      st.textContent = `جارٍ قراءة الروابط… ${i+1}/${urlOnly.length}`;
+      try{ const r = await api('/api/competitors/from-url', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({url:urlOnly[i]})}); if(r.ok){ added++; urlRes.push(`✓ ${r.product} (${Math.round(r.score*100)}%)`); } else urlRes.push(`✗ ${r.reason || (r.error==='nomatch' ? 'لم أجد منتجاً مشابهاً عندنا' + (r.title ? ' لـ «'+r.title.slice(0,40)+'»' : '') : 'تعذّر')}`); }
+      catch(err){ urlRes.push('✗ تعذّر قراءة الرابط'); }
+    }
     if(withUrl.length){ const r = await api('/api/competitors', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({lines:withUrl})}); added += r.added || 0; (r.rejected||[]).forEach(x => rejected.push(x.product)); }
     const sameComp = (a, b) => a.replace(/\s+/g,'') === b.replace(/\s+/g,'');
     for(let i = 0; i < noUrl.length; i++){   // بلا رابط: نبحث عنه تلقائياً ونضيف أفضل مطابقة عند هذا المنافس
@@ -1259,7 +1266,7 @@ $('#compSubmit').addEventListener('click', async () => {
         added += a.added || 0;
       }catch(err){ notFound.push(l.product); }
     }
-    st.textContent = `أُضيف ${added}` + (notFound.length ? ` · لم أجد رابطاً لـ ${notFound.length}: ${notFound.slice(0,3).join('، ')}${notFound.length>3?'…':''} (ألصق رابطها يدوياً)` : '') + (rejected.length ? ` · روابط مرفوضة: ${rejected.length}` : '');
+    st.textContent = `أُضيف ${added}` + (urlRes.length ? ` · الروابط: ${urlRes.join(' | ')}` : '') + (notFound.length ? ` · لم أجد رابطاً لـ ${notFound.length}: ${notFound.slice(0,3).join('، ')}${notFound.length>3?'…':''} (ألصق رابطها يدوياً)` : '') + (rejected.length ? ` · روابط مرفوضة: ${rejected.length}` : '');
     toast(`أُضيف ${added} للمراقبة`);
     if(added) $('#compLines').value = notFound.length ? noUrl.filter(l => notFound.includes(l.product)).map(l => `${l.product} | ${l.competitor} | `).join('\n') : '';   // نُبقي غير الموجود فقط
   }catch(err){ st.textContent = 'تعذّرت الإضافة'; toast('تعذّرت الإضافة'); }

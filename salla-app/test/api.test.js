@@ -407,3 +407,18 @@ test('competitors /clean: unverified name matches whose title fits another of ou
   const items = (await (await get(env, '/api/competitors')).json()).items;
   assert.equal(items.filter((x) => x.ignored).length, 1); assert.ok(items.find((x) => x.ignored).product.startsWith('نان حليب') && items.find((x) => x.ignored).verified === 0 && items.find((x) => x.ignored).matchby === 'name');
 });
+
+test('competitors /from-url: a lone competitor URL is read, matched to our catalog by title and added (unverified name match)', async () => {
+  const env = mkEnv(); const prev = mockFetch(good); const fn = globalThis.fetch;
+  const html = `<script type="application/ld+json">{"@type":"Product","name":"لاروش بوزيه افاكلار جل تنظيف 200 مل","offers":{"price":89,"availability":"https://schema.org/InStock"}}</script>`;
+  globalThis.fetch = async (u, i) => String(u).startsWith('https://www.nahdionline.com/') ? new Response(html) : fn(u, i);
+  await ensureSchema(env.DB);
+  const cat = async (n, p) => env.DB.prepare('INSERT INTO catalog (merchant, name, price, img, cat, taxable) VALUES (?, ?, ?, ?, ?, ?)').bind('346539387', n, p, '', '', 1).run();
+  await cat('لاروش بوزيه افاكلار جل تنظيف 200 مل', 100); await cat('نيوتروجينا كريم مرطب 50 مل', 40);
+  const post = (body) => worker.fetch(new Request('https://x.test/api/competitors/from-url', { method: 'POST', body: JSON.stringify(body), ...auth }), env);
+  const r = await (await post({ url: 'https://www.nahdionline.com/ar-sa/p/pdp/1' })).json();
+  assert.equal(r.ok, true); assert.equal(r.competitor, 'النهدي'); assert.ok(r.product.startsWith('لاروش')); assert.ok(r.score >= 0.85);
+  assert.equal((await (await post({ url: 'https://unknown-shop.com/p/1' })).json()).error, 'unsupported');
+  const items = (await (await get(env, '/api/competitors')).json()).items;
+  assert.equal(items.length, 1); assert.equal(items[0].price, 89);
+});
