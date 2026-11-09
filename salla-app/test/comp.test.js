@@ -164,3 +164,18 @@ test('stocktakeRows: merges top sold and top canceled without duplicates; items 
   const rc = stocktakeRows(rows, 2, new Map([[normText('B'), { sku: '628', id: '77' }]]));
   assert.deepEqual([rc[0][2], rc[0][3], rc[1][2], rc[1][3], rc[2][2]], ['الباركود', 'الكود الداخلي', '628', '77', '']);
 });
+
+test('suggestFor: اوت ليت العناية is found through its sitemap (Arabic slugs), never through the search path robots.txt disallows', async () => {
+  const slug = 'سيميلاك-جولد-حليب-3-داعم-للنمو-1600-جم', calls = [];
+  const page = '<script type="application/ld+json">{"@type":"Product","name":"سيميلاك جولد حليب (3) داعم للنمو 1600 جم","offers":{"price":195.5,"availability":"https://schema.org/InStock"}}</script>';
+  const fetchFn = async (u) => {
+    u = String(u); calls.push(u);
+    if (u === 'https://care-outlet.com/sitemap.xml') return new Response('<sitemapindex><sitemap><loc>https://care-outlet.com/sitemap_products.xml</loc></sitemap><sitemap><loc>https://care-outlet.com/sitemap_pages.xml</loc></sitemap></sitemapindex>');
+    if (u === 'https://care-outlet.com/sitemap_products.xml') return new Response(`<urlset><url><loc>https://care-outlet.com/products/${slug}</loc></url><url><loc>https://care-outlet.com/products/منتج-آخر-مختلف-تماما-50-مل</loc></url></urlset>`);
+    if (decodeURIComponent(u) === 'https://care-outlet.com/products/' + slug) return new Response(`<html>${page}</html>`);
+    return new Response('', { status: 404 });
+  };
+  const r = await suggestFor('سيميلاك جولد حليب (3) داعم للنمو 1600 جم', { fetchFn, sites: ['اوت ليت العناية'] });
+  assert.equal(r[0].competitor, 'اوت ليت العناية'); assert.equal(r[0].price, 195.5); assert.ok(r[0].score >= 0.85);
+  assert.ok(!calls.some((u) => /[?&](search|q)=/.test(u)));
+});

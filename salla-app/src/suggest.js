@@ -80,9 +80,10 @@ const MAPS = {
   'دار الأميرات': { root: 'https://daralamirat.com.sa/sitemap.xml', child: /\/ar\//, url: /\/ar\/.+\/p\d+$/ },
   'النهدي': { root: 'https://www.nahdionline.com/sitemap_index_ar.xml', child: /./, url: /\/pdp\/\d+$/, max: 9, titles: true },   // خريطتهم تحمل عنوان كل منتج بالعربية
   'ماي براند': { root: 'https://mybrand.com.sa/sitemap.xml', child: /sitemap-\d+\.xml$/, url: /\/p\d+$/ },
-  'صيدلية المتحدة': { root: 'https://unitedpharmacy.sa/sitemap_ar.xml', direct: true, url: /\/ar\/[^/]+\.html$/, titles: true }
+  'صيدلية المتحدة': { root: 'https://unitedpharmacy.sa/sitemap_ar.xml', direct: true, url: /\/ar\/[^/]+\.html$/, titles: true },
+  'اوت ليت العناية': { root: 'https://care-outlet.com/sitemap.xml', child: /sitemap_products\.xml$/, url: /\/products\/[^/]+$/ }   // روابطه عربية؛ robots.txt يمنع مسار البحث فنقرأ خريطة الموقع فقط
 };
-const SEARCH = { 'صيدلية كوم': shopifySearch('sidalih.com'), 'اوت ليت العناية': zidProductsSearch('care-outlet.com') };
+const SEARCH = { 'صيدلية كوم': shopifySearch('sidalih.com') };
 export const SUGGEST_SITES = [...Object.keys(SEARCH), ...Object.keys(MAPS)];
 
 // ملفات خرائط المواقع قد تكون ضخمة (النهدي: 7 ملفات بحجم 23MB لكل منها، 64 ألف منتج): نحلّلها واحداً بعد الآخر ونخزّن المسارات والعناوين فقط
