@@ -239,7 +239,7 @@ test('months: average over complete months only; endpoint requires auth and retu
 
 test('search-gaps: key stays server-side; friendly errors; Salla token or share (first 50 rows); cached', async () => {
   const sample = { generated_at: 1793500000000, totals: { searches: 1840, zero_searches: 212, missing_phrases: 31, recovered_phrases: 18 },
-    missing: [{ q: 'dermedic', total: 7, zero: 7, results: 0, first: 1, last: 2, evil: 'x' }], codes: [], recovered: [{ q: 'a', total: 3, zero: 1, results: 4, first: 1, last: 2 }], top: [] };
+    missing: [{ q: 'dermedic', total: 7, zero: 7, results: 0, first: 1, last: 2, evil: 'x' }], codes: [], recovered: [{ q: 'a', total: 3, zero: 1, results: 4, first: 1, last: 2 }], top: [], approximate: [{ q: 'ميكسا', total: 5, zero: 0, results: 2, first: 1, last: 2, corrected_to: 'ميسا', evil: { x: 1 } }] };
   let seen = null, status = 200;
   const mk = (extra = {}) => ({ ...mkEnv(), REPORT_KEY: 'sekret-123', SEARCH: { fetch: async (u, init) => { seen = { u, key: init.headers['x-report-key'] }; return new Response(JSON.stringify(sample), { status }); } }, ...extra });
   mockFetch(good);
@@ -247,6 +247,7 @@ test('search-gaps: key stays server-side; friendly errors; Salla token or share 
   const r = await get(env, '/api/search-gaps'); assert.equal(r.status, 200);
   const body = await r.text(); assert.ok(!body.includes('sekret-123')); const j = JSON.parse(body);
   assert.equal(seen.key, 'sekret-123'); assert.equal(j.totals.zero_searches, 212); assert.equal(j.missing[0].q, 'dermedic'); assert.equal(j.missing[0].evil, undefined);
+  assert.equal(j.approximate[0].q, 'ميكسا'); assert.equal(j.approximate[0].note, 'ميسا'); assert.ok(!JSON.stringify(j.approximate).includes('evil'));   // الحقول الإضافية النصية فقط تُعرض كملاحظة
   seen = null; await get(env, '/api/search-gaps'); assert.equal(seen, null);                 // من الذاكرة المؤقتة
   __clearMemo(); status = 401; assert.equal((await (await get(env, '/api/search-gaps')).json()).error, 'bad_key');
   __clearMemo(); status = 503; assert.equal((await (await get(env, '/api/search-gaps')).json()).error, 'disabled');

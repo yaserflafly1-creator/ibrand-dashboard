@@ -625,7 +625,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
     <div class="mini-kpis" id="buyKpis" style="grid-template-columns:repeat(4,1fr)"></div>
     <div class="buy-tools">
       <div class="seg" id="buyMode" role="group" aria-label="نوع القائمة">
-        <button type="button" data-m="missing" class="on">مفقودة</button><button type="button" data-m="codes">باركودات وأرقام</button><button type="button" data-m="recovered">تم تداركها</button><button type="button" data-m="top">الأكثر بحثاً</button>
+        <button type="button" data-m="missing" class="on">مفقودة</button><button type="button" data-m="codes">باركودات وأرقام</button><button type="button" data-m="recovered">تم تداركها</button><button type="button" data-m="approximate" title="عبارات صُحّحت تلقائياً إلى أقرب كلمة؛ راجعها لتكتشف التصحيح الخاطئ بين الماركات (مثل ميكسا→ميسا)">تقريبية</button><button type="button" data-m="top">الأكثر بحثاً</button>
       </div>
       <input id="buyFilter" type="search" placeholder="ابحث في العبارات…" autocomplete="off" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit;min-width:180px">
     </div>
@@ -1289,7 +1289,7 @@ const BUY_MSG = {not_configured:'تقرير البحث غير مفعّل بعد:
 function demoBuy(){
   const now = Date.now(), d = k => now - k*864e5, row = (q,total,zero,results,k) => ({q, total, zero, results, first:d(k+20), last:d(k)});
   return {generated_at:now, totals:{searches:1840, zero_searches:212, missing_phrases:6, recovered_phrases:2},
-    missing:[row('ديرميديك',14,14,0,1), row('بيبي دريم',9,9,0,2), row('كريم اساس',7,7,0,3), row('اوميغا 3 اطفال',5,5,0,5), row('شامبو الكيرتين',4,4,0,6), row('حفاضات بالغين',3,3,0,9)],
+    approximate:[{...row('ميكسا',6,0,3,2), note:'ميسا'}], missing:[row('ديرميديك',14,14,0,1), row('بيبي دريم',9,9,0,2), row('كريم اساس',7,7,0,3), row('اوميغا 3 اطفال',5,5,0,5), row('شامبو الكيرتين',4,4,0,6), row('حفاضات بالغين',3,3,0,9)],
     codes:[row('6281006422211',4,4,0,2), row('5000158062153',2,2,0,7)], recovered:[row('بامبرز',22,6,18,4), row('سيريلاك',15,3,9,8)],
     top:[row('حفاضات',210,0,41,0), row('حليب',188,2,37,0), row('سيميلاك',120,0,12,1), row('بنادول',96,1,5,1)]};
 }
@@ -1320,7 +1320,7 @@ function renderBuy(){
   $('#buyKpis').innerHTML = [[fmt(T.searches),'عمليات البحث'], [fmt(T.zero_searches)+' <small style="font-size:.8rem;color:var(--muted)">('+pct.toFixed(1)+'%)</small>','بحث بلا نتيجة'], [fmt(T.missing_phrases),'عبارات ما زالت مفقودة'], [fmt(T.recovered_phrases),'عبارات تم تدارك توفيرها']]
     .map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('');
   const rows = buyList();
-  $('#buyRows').innerHTML = rows.length ? rows.map(x => `<tr><td dir="auto">${esc(x.q)}</td><td>${fmt(x.total)}</td><td>${fmt(x.zero)}</td>
+  $('#buyRows').innerHTML = rows.length ? rows.map(x => `<tr><td dir="auto">${esc(x.q)}${x.note ? `<br><small style="color:var(--muted)">← ${esc(x.note)}</small>` : ''}</td><td>${fmt(x.total)}</td><td>${fmt(x.zero)}</td>
     <td>${x.results>0 ? `<span style="color:#16a34a;font-weight:700">متوفر (${fmt(x.results)})</span>` : '<span style="color:#dc2626;font-weight:700">غير موجود</span>'}</td>
     <td>${x.last ? fmtDate(x.last) : '—'}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">لا توجد نتائج</td></tr>';
   buyStamp();

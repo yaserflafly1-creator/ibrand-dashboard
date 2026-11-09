@@ -387,12 +387,15 @@ const SHARE_GAP_ROWS = 50;
 const SEARCH_CACHE_MS = 60e3;
 const SEARCH_DEFAULT_URL = 'https://ibrand-search.ibrandsales.workers.dev/report/data';
 const gapRows = (a) => (Array.isArray(a) ? a : []).slice(0, 500).map((x) => ({ q: String(x?.q ?? '').slice(0, 120), total: Number(x?.total) || 0, zero: Number(x?.zero) || 0, results: Number(x?.results) || 0, first: Number(x?.first) || 0, last: Number(x?.last) || 0 }));
+// قائمة «تقريبية» (عبارات صُحّحت تلقائياً إلى أقرب كلمة، مثل ميكسا→ميسا): نحتفظ بحقولها الإضافية النصية/الرقمية (حتى 3) لعرضها ملاحظةً بجانب العبارة
+const KNOWN_GAP_KEYS = new Set(['q', 'total', 'zero', 'results', 'first', 'last']);
+const approxRows = (a) => (Array.isArray(a) ? a : []).slice(0, 500).map((x) => ({ ...gapRows([x])[0], note: Object.entries(x || {}).filter(([k, v]) => !KNOWN_GAP_KEYS.has(k) && (typeof v === 'string' || (typeof v === 'number' && k !== 'ts'))).slice(0, 3).map(([, v]) => String(v).slice(0, 80)).join(' ← ') }));
 async function handleSearchGaps(req, env) {
   const ctx = await dataContext(req, env);
   if (ctx.res) return ctx.res;
   if (!env.REPORT_KEY) return json({ error: 'not_configured' });
   try {
-    const cut = (text) => { if (!ctx.shared) return text; const d = JSON.parse(text); for (const k of ['missing', 'codes', 'recovered', 'top']) d[k] = d[k].slice(0, SHARE_GAP_ROWS); return JSON.stringify(d); };
+    const cut = (text) => { if (!ctx.shared) return text; const d = JSON.parse(text); for (const k of ['missing', 'codes', 'recovered', 'top', 'approximate']) if (Array.isArray(d[k])) d[k] = d[k].slice(0, SHARE_GAP_ROWS); return JSON.stringify(d); };
     const hit = memoStore.get('searchgaps');
     if (hit && hit.exp > Date.now()) return new Response(cut(hit.v), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     const init = { headers: { 'x-report-key': env.REPORT_KEY } };
@@ -403,7 +406,7 @@ async function handleSearchGaps(req, env) {
     const d = await r.json();
     const t = d.totals || {};
     const text = JSON.stringify({ generated_at: Number(d.generated_at) || 0, totals: { searches: Number(t.searches) || 0, zero_searches: Number(t.zero_searches) || 0, missing_phrases: Number(t.missing_phrases) || 0, recovered_phrases: Number(t.recovered_phrases) || 0 },
-      missing: gapRows(d.missing), codes: gapRows(d.codes), recovered: gapRows(d.recovered), top: gapRows(d.top) });
+      missing: gapRows(d.missing), approximate: approxRows(d.approximate), codes: gapRows(d.codes), recovered: gapRows(d.recovered), top: gapRows(d.top) });
     if (memoStore.size > 120) memoStore.clear();
     memoStore.set('searchgaps', { v: text, exp: Date.now() + SEARCH_CACHE_MS });   // ذاكرة مؤقتة داخل الـ isolate فقط (لا KV ولا D1 ولا Cache API) لدقيقة؛ أخطاء الخدمة لا تُخزَّن
     return new Response(cut(text), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
