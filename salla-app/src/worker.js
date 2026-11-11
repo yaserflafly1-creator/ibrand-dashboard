@@ -650,8 +650,8 @@ async function startJob(env, merchant, n, mode, now = Date.now(), only = '', kee
   const cur = await getMeta(env.DB, merchant, JOB, null);
   if (cur && !cur.done) return cur;                                                   // مهمة جارية: لا نبدأ ثانية
   const today = riyadhDay(now), rows = await rangeRows(env.DB, merchant, addDays(today, -30), today);
-  let queue = sumDays(rows, true, null).products.slice(0, Math.min(2000, Math.max(1, n))).map((p) => p.name);
-  const want = Math.min(2000, Math.max(1, n));
+  let queue = sumDays(rows, true, null).products.slice(0, Math.min(5000, Math.max(1, n))).map((p) => p.name);
+  const want = Math.min(5000, Math.max(1, n));
   if (queue.length < want) {                                                         // مبيعات آخر 30 يوماً أقل من المطلوب: نكمل من كتالوجنا (بعد الأكثر مبيعاً)
     const have = new Set(queue);
     for (const r of await catalogBlob(env.TOKENS, env.DB, merchant)) { if (queue.length >= want) break; if (r.name && !have.has(r.name)) { have.add(r.name); queue.push(r.name); } }
@@ -682,7 +682,7 @@ async function compWeekly(env, merchant, now) {
   const at = await getMeta(env.DB, merchant, 'comp_weekly_at', 0), cur = await getMeta(env.DB, merchant, JOB, null);
   if ((!cur || cur.done) && now - at >= 7 * 864e5) { await startJob(env, merchant, Number(env.COMP_TOP) || COMP_TOP, 'weekly', now); await setMeta(env.DB, merchant, 'comp_weekly_at', now); }
   const j = await getMeta(env.DB, merchant, JOB, null);
-  if (j && !j.done) await jobStep(env, merchant, Number(env.COMP_BATCH) || 8);
+  if (j && !j.done) await jobStep(env, merchant, Number(env.COMP_BATCH) || 12);
 }
 const SUGGEST_SITES_ALL = SUGGEST_SITES;
 async function handleCompetitors(req, env) {
