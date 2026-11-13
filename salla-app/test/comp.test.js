@@ -179,3 +179,14 @@ test('suggestFor: اوت ليت العناية is found through its sitemap (Ara
   assert.equal(r[0].competitor, 'اوت ليت العناية'); assert.equal(r[0].price, 195.5); assert.ok(r[0].score >= 0.85);
   assert.ok(!calls.some((u) => /[?&](search|q)=/.test(u)));
 });
+
+test('soldStockRows: items sold in the period with current availability; unavailable first (best sellers first), then not-in-stock-list, then available', async () => {
+  const { soldStockRows } = await import('../src/export.js');
+  const day = (prod) => ({ day: '2025-06-10', prod });
+  const rows = [day({ A: [50, 500, ''], B: [30, 300, ''], C: [10, 100, ''], D: [80, 800, ''] })];
+  const recent = [{ day: '2026-11-01', prod: { A: [5, 50, ''] } }];
+  const inv = [{ name: 'A', qty: 0, sku: '111' }, { name: 'A', qty: 0, sku: '111' }, { name: 'B', qty: 7, sku: '222' }, { name: 'D', qty: 0, unlimited: true, sku: '444' }];   // C غير موجود
+  const r = soldStockRows(rows, recent, inv);
+  assert.deepEqual(r.slice(1).map((x) => x[1]), ['A', 'C', 'D', 'B']);
+  assert.equal(r[1][5], 'غير متوفر (نفد)'); assert.equal(r[2][5], 'غير موجود في المخزون الحالي'); assert.equal(r[3][5], 'متوفر'); assert.equal(r[1][2], '111'); assert.equal(r[1][7], 5);
+});

@@ -36,7 +36,28 @@ export function periodRange(period, today, from, to) {
   }
 }
 
-export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary', 'stocktake'];
+export const REPORTS = ['daily', 'products', 'categories', 'cancelled', 'summary', 'stocktake', 'soldstock'];
+
+/* الأصناف المباعة في فترة (مثل يونيو 2025) مقابل توفرها الآن: من الملخصات اليومية (الفترة + آخر 90 يوماً) ومخزون سلة الحالي.
+   يرتّب الأصناف غير المتوفرة الآن أولاً (الأكثر مبيعاً في الفترة قبل غيره): هي المرشحة لتفسير نزول المبيعات. المطابقة بالاسم؛ ما لا يوجد في المخزون الحالي يُعلَّم «غير موجود في المخزون». */
+export function soldStockRows(rows, recentRows, inv) {
+  const sum = (rs) => { const m = {}; for (const d of rs) for (const k in d.prod || {}) { const e = m[k] || (m[k] = [0, 0]); e[0] += d.prod[k][0]; e[1] += d.prod[k][1]; } return m; };
+  const then = sum(rows), now = sum(recentRows), stock = new Map();
+  for (const it of inv || []) {
+    const k = nk(it.name), e = stock.get(k) || { qty: 0, unlimited: false, sku: '' };
+    e.qty += Number(it.qty) || 0; e.unlimited = e.unlimited || !!it.unlimited; e.sku = e.sku || String(it.sku || '');
+    stock.set(k, e);
+  }
+  const list = Object.entries(then).map(([name, [q, t]]) => {
+    const st = stock.get(nk(name)), left = st ? (st.unlimited ? 'غير محدود' : st.qty) : '';
+    const state = !st ? 'غير موجود في المخزون الحالي' : st.unlimited || st.qty > 0 ? 'متوفر' : 'غير متوفر (نفد)';
+    return { name, q, t, st, left, state, now: (now[name] || [0])[0] };
+  });
+  const rank = (x) => (x.state === 'متوفر' ? 2 : x.state.startsWith('غير موجود') ? 1 : 0);
+  list.sort((a, b) => rank(a) - rank(b) || b.q - a.q);
+  return [['#', 'الصنف', 'الباركود', 'الكمية المباعة في الفترة', 'مبيعات الفترة (ر.س)', 'الحالة الآن', 'الكمية المتاحة الآن', 'الكمية المباعة آخر 90 يوماً', 'ملاحظات'],
+    ...list.map((x, i) => [i + 1, x.name, (x.st && x.st.sku) || '', x.q, r2(x.t), x.state, x.left, x.now, ''])];
+}
 
 /* قائمة الجرد: أكثر N صنف مبيعاً ∪ أكثر N صنف إلغاءً (دمج المكرر في سطر واحد).
    من وقع في القائمتين فهو «مشكلة»: يُباع كثيراً ويُلغى كثيراً (غالباً رصيد نظام لا يطابق الرف) فيُجرد أولاً ويُعتمد رقم الجرد في تعديل الستوك. */
@@ -59,12 +80,13 @@ export function stocktakeRows(rows, limit = 1000, codes = null) {
     ...list.map((x, i) => [i + 1, x.n, (codes && codes.get(nk(x.n)) || {}).sku || '', (codes && codes.get(nk(x.n)) || {}).id || '', x.both ? 'مشكلة: مباع وملغى' : x.onlyC ? 'إلغاء فقط' : 'مبيعات فقط', x.q, x.rs, x.c, x.rc, pct(x.rate), '', ''])];
 }
 
-export function buildReport(report, rows, { catMap, vatMap, codes } = {}) {
+export function buildReport(report, rows, { catMap, vatMap, codes, recent, inv } = {}) {
   if (report === 'daily') {
     return [['اليوم', 'الطلبات', 'المبيعات', 'متوسط الطلب', 'الملغية (عدد)', 'الملغية (قيمة)'],
       ...rows.map((d) => [d.day, d.valid, r2(d.revenue), d.valid ? r2(d.revenue / d.valid) : 0, d.canceled || 0, r2(d.lost?.canceled?.v)])];
   }
   if (report === 'stocktake') return stocktakeRows(rows, 1000, codes);
+  if (report === 'soldstock') return soldStockRows(rows, recent || [], inv || []);
   const a = sumDays(rows, true, vatMap);
   if (report === 'products') {
     return [['المنتج', 'الكمية', 'المبيعات', 'الحصة %'], ...a.products.map((p) => [p.name, p.qty, r2(p.total), pct(p.share)])];

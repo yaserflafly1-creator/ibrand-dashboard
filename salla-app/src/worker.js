@@ -291,7 +291,9 @@ async function handleExport(req, env) {
     const rows = await rangeRows(env.DB, rec.merchant, from, to);
     const cat = (report === 'categories' || report === 'products') ? await catInfo(env, rec.merchant) : null;
     const codes = report === 'stocktake' ? await productCodes(env, rec.merchant).catch(() => new Map()) : null;
-    return '\uFEFF' + toCsv(buildReport(report, rows, { catMap: cat?.cats, vatMap: cat?.vat, codes }));
+    const today = riyadhDay(Date.now()), recent = report === 'soldstock' ? await rangeRows(env.DB, rec.merchant, addDays(today, -89), today) : null;
+    const inv = report === 'soldstock' ? await readInventory(env.DB, rec.merchant) : null;
+    return '\uFEFF' + toCsv(buildReport(report, rows, { catMap: cat?.cats, vatMap: cat?.vat, codes, recent, inv }));
   });
   return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
 }
