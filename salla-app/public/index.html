@@ -258,6 +258,15 @@ body[data-tab="ops"] [data-tab]:not([data-tab="ops"]){display:none!important}
 body[data-tab="cx"] [data-tab]:not([data-tab="cx"]){display:none!important}
 body[data-tab="buy"] [data-tab]:not([data-tab="buy"]){display:none!important}
 body[data-tab="care"] [data-tab]:not([data-tab="care"]){display:none!important}
+.ai-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px}
+.ai-card{background:var(--pink-50,#fdf2f8);border:1px solid var(--border);border-radius:16px;padding:16px 14px}
+.ai-card b{display:block;font-size:2rem;line-height:1.2}.ai-card b small{font-size:.9rem;font-weight:600;color:var(--muted);margin-inline-start:4px}
+.ai-card span{display:block;font-weight:700;margin-top:4px}.ai-card em{display:block;font-style:normal;font-size:.76rem;color:var(--muted);margin-top:4px;line-height:1.5}
+.ai-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.ai-box{border:1px solid var(--border);border-radius:14px;padding:12px 14px}.ai-box h3{margin:0 0 8px;font-size:1rem}
+.ai-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:6px 0;border-top:1px solid var(--border);font-size:.88rem}.ai-row:first-child{border-top:0}
+.ai-row .bar{grid-column:1/-1;height:5px;border-radius:99px;background:var(--border);overflow:hidden}.ai-row .bar i{display:block;height:100%;background:#ec4899}
+.ai-empty{color:var(--muted);font-size:.85rem;padding:6px 0}
 body[data-tab="ai"] [data-tab]:not([data-tab="ai"]){display:none!important}
 body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
 /* كمل احتياجك */
@@ -610,10 +619,17 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
   </section>
 
   <section data-tab="ai" class="card panel sec" id="aiPanel">
-    <div class="panel-h"><div><h2>المساعد الذكي</h2><p id="aiSub">أرقام المساعد في المتجر · آخر 30 يوماً (لا تتأثر بفلتر التاريخ) · أرقام فقط بلا نصوص محادثات</p></div></div>
-    <div class="mini-kpis" id="aiKpis" style="grid-template-columns:repeat(4,1fr)"></div>
-    <div class="chart-box" style="height:240px"><canvas id="aiChart" dir="ltr"></canvas></div>
-    <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>المؤشر</th><th>النسبة</th></tr></thead><tbody id="aiRates"></tbody></table></div>
+    <div class="panel-h"><div><h2>المساعد الذكي · تقرير الإدارة</h2><p id="aiSub">أرقام مجمّعة لآخر 30 يوماً (لا تتأثر بفلتر التاريخ) · بلا نصوص محادثات</p></div><button class="btn" id="aiRefresh" type="button">تحديث</button></div>
+    <div class="ai-cards" id="aiHead"></div>
+    <div class="ai-grid">
+      <div class="ai-box"><h3>نتيجة المحادثات</h3><div id="aiOutcomes"></div></div>
+      <div class="ai-box"><h3>ما وصل له العملاء</h3><div id="aiMet"></div></div>
+      <div class="ai-box"><h3>طلبات لم يجدها العملاء</h3><div id="aiMiss"></div></div>
+      <div class="ai-box"><h3>أكثر المنتجات ترشيحًا</h3><div id="aiRec"></div></div>
+      <div class="ai-box"><h3>أكثر المنتجات إضافة للسلة</h3><div id="aiAdd"></div></div>
+    </div>
+    <h3 style="margin:18px 0 8px">المنحنى اليومي</h3>
+    <div class="chart-box" style="height:260px"><canvas id="aiChart" dir="ltr"></canvas></div>
     <p class="period-note" id="aiNote" style="margin:10px 0 0"></p>
   </section>
 
@@ -1092,51 +1108,59 @@ document.addEventListener('click', async e => {
   finally{ btn.disabled = false; btn.textContent = old; }
 });
 
-/* ============ المساعد الذكي (أرقام فقط من خدمة ibrand-search عبر الخادم؛ السر لا يصل المتصفح) ============ */
+/* ============ المساعد الذكي · تقرير الإدارة (من خدمة ibrand-search عبر الخادم؛ السر لا يصل المتصفح؛ بلا نصوص محادثات) ============ */
 let aiData = null, aiErr = '', aiAt = 0, aiSeq = 0, aiChart = null;
-const AI_MSG = {not_configured:'تقرير المساعد غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'خدمة البحث لم تفعّل التقرير بعد.', not_ready:'تقرير المساعد غير منشور بعد في خدمة البحث.', unreachable:'تعذّر الوصول لخدمة البحث الآن، حاول بعد قليل.'};
-const AI_LBL = {msgs:'الرسائل', messages:'الرسائل', handoffs:'التحويلات', handoff:'التحويلات', transfers:'التحويلات', escalations:'التحويلات', carts:'إضافات السلة', cart_adds:'إضافات السلة', ratings:'التقييمات', rating:'التقييمات', ratings_up:'تقييمات إيجابية', ratings_down:'تقييمات سلبية', up:'إيجابية', down:'سلبية',
-  tokens:'التوكنز', conversations:'المحادثات', chats:'المحادثات', sessions:'الجلسات', users:'الزوار', visitors:'الزوار', products:'منتجات مقترحة', clicks:'النقرات',
-  cart_rate:'نسبة إضافة السلة', handoff_rate:'نسبة التحويل', rating_rate:'نسبة التقييم', carts_per_msg:'إضافات السلة لكل رسالة'};
-const aiLabel = k => AI_LBL[k] || k.replace(/_/g,' ');
-const AI_ORDER = ['msgs','messages','conversations','chats','handoffs','handoff','transfers','escalations','carts','cart_adds','ratings','rating','tokens'];
+const AI_MSG = {not_configured:'تقرير المساعد غير مفعّل بعد: أضف السر REPORT_KEY في إعدادات Cloudflare للداشبورد.', bad_key:'رقم التقرير غير صحيح. تحقق من REPORT_KEY في إعدادات Cloudflare.', disabled:'تقرير المساعد معطّل في خدمة البحث.', not_ready:'تقرير الإدارة غير جاهز بعد في خدمة البحث.', unreachable:'تعذّر الوصول لخدمة البحث. حاول لاحقاً.'};
+const AI_SERIES = [['conv','المحادثات',['conversations','chats','sessions','conversation_count'],'#ec4899'], ['msgs','الرسائل',['messages','msgs','message_count'],'#7c3aed'], ['rec','المرشَّح',['recommended','recommendations','recommended_products','suggested'],'#14b8a6'], ['add','الإضافات',['added_to_cart','added','cart_adds','carts','add_to_cart'],'#f59e0b']];
 function demoAi(){
-  const daily = [], t = new Date(); for(let i=29;i>=0;i--){ const d = new Date(t.getFullYear(), t.getMonth(), t.getDate()-i); const m = 20+((i*7)%23); daily.push({day:ymd(d), msgs:m, carts:Math.round(m/9), handoffs:Math.round(m/12), tokens:m*420}); }
-  const sum = k => daily.reduce((a,x) => a+x[k], 0);
-  return {generated_at:Date.now(), totals:{msgs:sum('msgs'), handoffs:sum('handoffs'), carts:sum('carts'), ratings:41, tokens:sum('tokens')}, rates:{cart_rate:9.1, handoff_rate:7.4}, daily};
+  const daily = [], t = new Date(); for(let i=29;i>=0;i--){ const d = new Date(t.getFullYear(), t.getMonth(), t.getDate()-i); const c = 12+((i*5)%11); daily.push({day:ymd(d), conversations:c, messages:c*4, recommended:Math.round(c*1.6), added_to_cart:Math.round(c/4)}); }
+  return {days:30, generated_at:Date.now(), headline:[{label:'المحادثات', value:daily.reduce((a,x)=>a+x.conversations,0), hint:'عدد المحادثات في الفترة', unit:''},{label:'وصل لمنتج مناسب', value:68.4, hint:'نسبة المحادثات التي رُشِّح فيها منتج', unit:'%'},{label:'أُضيف للسلة', value:daily.reduce((a,x)=>a+x.added_to_cart,0), hint:'منتجات أُضيفت للسلة من المحادثة', unit:'منتج'}],
+    outcomes:[{name:'وجد ما يريد',count:210,percent:null},{name:'لم يجد المنتج',count:64,percent:null},{name:'تحويل لموظف',count:23,percent:null}],
+    top_recommended:[{name:'بيبي جوي مقاس (5) جامبو',count:41},{name:'سيميلاك جولد (3)',count:33}], top_added_to_cart:[{name:'بيبي جوي مقاس (5) جامبو',count:12},{name:'نان حليب (3)',count:9}],
+    needs_met:[{name:'حليب أطفال',count:90},{name:'حفاضات',count:77}], needs_not_served:[{name:'منتج غير متوفر',count:15}], daily, tracking_note:'بيانات تجريبية.'};
 }
 async function loadAi(force){
   if(!force && aiData && Date.now()-aiAt < 300e3) return;
   const seq = ++aiSeq;
   try{
-    const d = LIVE ? await api('/api/chat-stats', {cache:'no-store'}) : demoAi();
+    const d = LIVE ? await api('/api/chat-management?days=30', {cache:'no-store'}) : demoAi();
     if(seq !== aiSeq) return;
     if(d.error){ aiErr = d.error; aiData = null; } else { aiErr = ''; aiData = d; aiAt = Date.now(); }
   }catch(e){ if(seq !== aiSeq) return; aiErr = e.status===401 ? 'unauthorized' : 'unreachable'; aiData = null; }
   renderAi();
 }
+const aiNum = v => typeof v === 'number' ? (Number.isInteger(v) ? fmt(v) : v.toLocaleString('en-US',{maximumFractionDigits:1})) : esc(v ?? '—');
+function aiList(el, items, empty){
+  const rows = (items||[]).filter(x => x && x.name);
+  if(!rows.length){ el.innerHTML = `<div class="ai-empty">${esc(empty)}</div>`; return; }
+  const mx = Math.max(1, ...rows.map(x => x.count ?? x.percent ?? 0));
+  el.innerHTML = rows.map(x => { const v = x.count ?? x.percent, w = v==null ? 0 : Math.max(3, Math.round(v/mx*100));
+    return `<div class="ai-row"><span dir="auto">${esc(x.name)}</span><b>${v==null ? '' : aiNum(v)}${x.count==null && x.percent!=null ? '%' : ''}</b>${v==null ? '' : `<div class="bar"><i style="width:${w}%"></i></div>`}</div>`; }).join('');
+}
 function renderAi(){
   if(!$('#aiPanel')) return;
   if(!aiData){
-    $('#aiKpis').innerHTML = ''; $('#aiRates').innerHTML = '';
+    ['#aiHead','#aiOutcomes','#aiMet','#aiMiss','#aiRec','#aiAdd'].forEach(i => { $(i).innerHTML = ''; });
     $('#aiNote').textContent = AI_MSG[aiErr] || (aiErr==='unauthorized' ? 'انتهت صلاحية الرابط.' : 'جارٍ التحميل…');
     if(aiChart){ aiChart.destroy(); aiChart = null; } return;
   }
-  const D = aiData, keys = Object.keys(D.totals).sort((a,b) => { const ia = AI_ORDER.indexOf(a), ib = AI_ORDER.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); }).slice(0,8);
-  $('#aiKpis').innerHTML = keys.length ? keys.map(k => `<div class="mini"><b>${fmt(D.totals[k])}</b><span>${esc(aiLabel(k))}</span></div>`).join('') : '<div class="empty" style="grid-column:1/-1">لا توجد أرقام بعد</div>';
-  const rr = Object.entries(D.rates || {});
-  $('#aiRates').innerHTML = rr.length ? rr.map(([k,v]) => `<tr><td>${esc(aiLabel(k))}</td><td>${v.toFixed(1)}%</td></tr>`).join('') : '<tr><td colspan="2" class="empty">لا توجد نسب</td></tr>';
-  // الرسم: الرسائل وإضافات السلة (أو أكبر حقلين رقميين) لآخر 30 يوماً مع ملء الأيام الفارغة بصفر
-  const num = new Set(); D.daily.forEach(x => Object.keys(x).forEach(k => { if(k!=='day') num.add(k); }));
-  let cols = ['msgs','carts'].filter(k => num.has(k));
-  if(!cols.length) cols = [...num].sort((a,b) => D.daily.reduce((s,x) => s+(x[b]||0),0) - D.daily.reduce((s,x) => s+(x[a]||0),0)).slice(0,2);
-  const t = new Date(), days = []; for(let i=29;i>=0;i--) days.push(ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate()-i)));
-  const byDay = new Map(D.daily.map(x => [x.day, x])), colors = ['#ec4899','#7c3aed','#14b8a6'];
-  const data = {labels:days.map(d => d.slice(5)), datasets:cols.map((k,i) => ({label:aiLabel(k), data:days.map(d => (byDay.get(d)||{})[k] || 0), backgroundColor:colors[i], borderRadius:4}))};
-  const opts = {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:8}}}, scales:{x:{grid:{display:false}, ticks:{maxTicksLimit:10}}, y:{beginAtZero:true, ticks:{precision:0}}}};
-  if(aiChart){ aiChart.data = data; aiChart.options = opts; aiChart.update(); } else aiChart = new Chart($('#aiChart'), {type:'bar', data, options:opts});
-  $('#aiNote').textContent = `آخر تحديث للتقرير: ${D.generated_at ? new Date(D.generated_at).toLocaleString('en-GB') : '—'}. أرقام مجمّعة فقط؛ لا تُعرض هنا أي نصوص محادثات.`;
+  const D = aiData;
+  $('#aiHead').innerHTML = D.headline.length ? D.headline.map(c => `<div class="ai-card"><b>${aiNum(c.value)}${c.unit ? `<small>${esc(c.unit)}</small>` : ''}</b><span>${esc(c.label)}</span>${c.hint ? `<em>${esc(c.hint)}</em>` : ''}</div>`).join('') : '<div class="ai-empty">لا توجد أرقام بعد</div>';
+  aiList($('#aiOutcomes'), D.outcomes, 'لا توجد بيانات بعد');
+  aiList($('#aiMet'), D.needs_met, 'لا توجد بيانات بعد');
+  aiList($('#aiMiss'), D.needs_not_served, 'لا توجد طلبات لم يجدها العملاء');
+  aiList($('#aiRec'), D.top_recommended, 'لا توجد بيانات بعد');
+  aiList($('#aiAdd'), D.top_added_to_cart, 'لا توجد بيانات بعد');
+  // المنحنى اليومي: المحادثات والرسائل والمرشَّح والإضافات، مع ملء الأيام الفارغة بصفر
+  const n = Math.min(120, D.days || 30), t = new Date(), days = []; for(let i=n-1;i>=0;i--) days.push(ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate()-i)));
+  const byDay = new Map((D.daily||[]).map(x => [x.day, x])), val = (x, keys) => { for(const k of keys) if(typeof (x||{})[k] === 'number') return x[k]; return 0; };
+  const used = AI_SERIES.filter(([, , keys]) => (D.daily||[]).some(x => keys.some(k => typeof x[k] === 'number')));
+  const data = {labels:days.map(d => d.slice(5)), datasets:used.map(([, label, keys, color]) => ({label, data:days.map(d => val(byDay.get(d), keys)), borderColor:color, backgroundColor:color, tension:.3, pointRadius:0, borderWidth:2}))};
+  const opts = {responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false}, plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:8}}}, scales:{x:{grid:{display:false}, ticks:{maxTicksLimit:10}}, y:{beginAtZero:true, ticks:{precision:0}}}};
+  if(aiChart){ aiChart.data = data; aiChart.options = opts; aiChart.update(); } else aiChart = new Chart($('#aiChart'), {type:'line', data, options:opts});
+  $('#aiNote').textContent = (D.tracking_note ? D.tracking_note + ' · ' : '') + `آخر تحديث للتقرير: ${D.generated_at ? new Date(D.generated_at).toLocaleString('en-GB') : '—'}. أرقام مجمّعة فقط؛ لا تُعرض أي نصوص محادثات.`;
 }
+$('#aiRefresh').addEventListener('click', () => { loadAi(true); toast('جارٍ تحديث التقرير…'); });
 
 /* ============ تحليل المنافسين (فحص مجاني من الخادم؛ داخل سلة فقط) ============ */
 let compData = null, compMode = 'all', compSeq = 0, compAt = 0;

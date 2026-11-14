@@ -521,6 +521,53 @@ async function handleChatStats(req, env) {
   } catch (e) { return json({ error: 'unreachable' }); }
 }
 
+/* ---------- /api/chat-management?days=30: تقرير الإدارة عن المساعد الذكي من خدمة ibrand-search (GET /report/management، نفس REPORT_KEY) ----------
+   نُعيد بناء كل حقل من قائمة بيضاء ونقصّ النصوص: لا يصل للصفحة إلا بطاقات وأسماء منتجات وتسميات مجمّعة وأرقام، فلا نصوص محادثات أبداً (اللوحة تُشارَك بروابط). */
+const mStr = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+const mNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const pick = (o, keys) => { for (const k of keys) if (o && o[k] !== undefined && o[k] !== null) return o[k]; return undefined; };
+const mItems = (a, nameKeys = ['label', 'name', 'product_name', 'title', 'product', 'q', 'phrase', 'key'], cntKeys = ['count', 'total', 'n', 'times', 'value', 'conversations']) =>
+  (Array.isArray(a) ? a : []).slice(0, 50).map((x) => {
+    if (typeof x === 'string') return { name: mStr(x, 120), count: null };
+    const name = mStr(pick(x, nameKeys), 120), c = pick(x, cntKeys), pctRaw = pick(x, ['percent', 'pct', 'share', 'rate']);
+    return { name, count: mNum(c), percent: mNum(pctRaw) };
+  }).filter((x) => x.name);
+function shapeManagement(d) {
+  const headline = (Array.isArray(d.headline) ? d.headline : []).slice(0, 12).map((c) => ({ label: mStr(c?.label, 80), value: typeof c?.value === 'number' ? mNum(c.value) : mStr(c?.value, 40), hint: mStr(c?.hint, 200), unit: mStr(c?.unit, 24) })).filter((c) => c.label);
+  const oc = d.outcomes && typeof d.outcomes === 'object' ? d.outcomes : {}, labels = oc.labels && typeof oc.labels === 'object' && !Array.isArray(oc.labels) ? oc.labels : {};
+  let outcomes = [];
+  const src = pick(oc, ['counts', 'values', 'data', 'items']);
+  if (Array.isArray(src)) outcomes = mItems(src);
+  else {
+    const o = src && typeof src === 'object' ? src : oc;
+    for (const [k, v] of Object.entries(o)) if (k !== 'labels' && mNum(v) !== null) outcomes.push({ name: mStr(labels[k], 80) || mStr(k, 60), count: v, percent: null });
+  }
+  const nm = (x) => mItems(x && typeof x === 'object' && !Array.isArray(x) ? x.items : x);
+  const daily = (Array.isArray(d.daily) ? d.daily : []).slice(-120).map((x) => ({ day: String(x?.day ?? x?.date ?? '').slice(0, 10), ...flatNums(x) })).filter((x) => DATE_RE.test(x.day));
+  return { generated_at: Number(d.generated_at) || 0, headline, outcomes, top_recommended: mItems(d.top_recommended), top_added_to_cart: mItems(d.top_added_to_cart), needs_met: nm(d.needs_met), needs_not_served: nm(d.needs_not_served), daily, tracking_note: mStr(d.tracking?.note, 400) };
+}
+async function handleChatManagement(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  if (!env.REPORT_KEY) return json({ error: 'not_configured' });
+  const days = Math.min(90, Math.max(1, Math.floor(Number(new URL(req.url).searchParams.get('days'))) || 30));
+  try {
+    const mk = 'chatmgmt:' + days, hit = memoStore.get(mk);
+    if (hit && hit.exp > Date.now()) return new Response(hit.v, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    const init = { headers: { 'x-report-key': env.REPORT_KEY } };
+    const base = (env.SEARCH_URL || SEARCH_DEFAULT_URL).replace(/\/report\/data$/, '');
+    const r = env.SEARCH ? await env.SEARCH.fetch('https://search.internal/report/management?days=' + days, init) : await fetch(base + '/report/management?days=' + days, init);
+    if (r.status === 401) return json({ error: 'bad_key' });
+    if (r.status === 503) return json({ error: 'disabled' });
+    if (r.status === 404) return json({ error: 'not_ready' });
+    if (!r.ok) return json({ error: 'unreachable', status: r.status });
+    const text = JSON.stringify({ days, ...shapeManagement(await r.json()) });
+    if (memoStore.size > 120) memoStore.clear();
+    memoStore.set(mk, { v: text, exp: Date.now() + SEARCH_CACHE_MS });
+    return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  } catch (e) { return json({ error: 'unreachable' }); }
+}
+
 /* ---------- /api/recent: آخر 30 طلباً مباشرة (للجدول ونافذة التفاصيل) ---------- */
 async function handleRecent(req, env) {
   const ctx = await authContext(req, env);
@@ -809,6 +856,7 @@ export default {
       if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
       if (pathname === '/api/care-orders' && req.method === 'GET') return await handleCare(req, env);
       if (pathname === '/api/chat-stats' && req.method === 'GET') return await handleChatStats(req, env);
+      if (pathname === '/api/chat-management' && req.method === 'GET') return await handleChatManagement(req, env);
       if (pathname.startsWith('/api/competitors')) return await handleCompetitors(req, env);
       if (pathname === '/api/basket' && req.method === 'GET') return await handleBasket(req, env);
       if (pathname === '/api/recent' && req.method === 'GET') return await handleRecent(req, env);

@@ -445,3 +445,32 @@ test('competitors /add-one: a lone barcode or a lone name finds our product and 
   assert.equal((await (await post({ code: '1234567890123', competitor: 'صيدلية كوم' })).json()).ok, false);   // باركود غير موجود عندنا
   assert.equal((await (await post({ product: name, competitor: 'صيدلية كوم' })).json()).added, 0);          // اسم: مسجّل سابقاً فلا يتكرر
 });
+
+test('chat-management: whitelisted cards/lists only (no conversation text), days clamped, key server-side, share allowed', async () => {
+  const sample = { generated_at: 1793500000000,
+    headline: [{ label: 'المحادثات', value: 320, hint: 'آخر 30 يوماً', unit: '', secret: 'x' }, { label: 'وصل لمنتج', value: 61.5, hint: 'نسبة', unit: '%' }],
+    outcomes: { labels: { found: 'وجد ما يريد', none: 'لم يجد' }, found: 200, none: 50, transcript: 'نص سري' },
+    top_recommended: [{ product_name: 'بيبي جوي', count: 40, last_message: 'نص محادثة سري' }], top_added_to_cart: [{ name: 'نان', total: 7 }],
+    needs_met: { items: [{ label: 'حليب', count: 90 }] }, needs_not_served: { items: [{ label: 'منتج غير موجود', count: 12 }] },
+    daily: [{ day: '2026-11-01', conversations: 10, messages: 40, recommended: 15, added_to_cart: 3, text: 'سري' }, { day: 'bad', conversations: 1 }],
+    tracking: { note: 'ملاحظة التتبع', raw: 'سري' }, conversations: [{ text: 'محادثة سرية' }] };
+  let seen = null, status = 200;
+  const env = { ...mkEnv(), REPORT_KEY: 'sekret-123', SEARCH: { fetch: async (u, init) => { seen = { u, key: init.headers['x-report-key'] }; return new Response(JSON.stringify(sample), { status }); } } };
+  mockFetch(good);
+  const r = await get(env, '/api/chat-management?days=30'); assert.equal(r.status, 200);
+  const body = await r.text(), j = JSON.parse(body);
+  assert.equal(seen.u, 'https://search.internal/report/management?days=30'); assert.equal(seen.key, 'sekret-123');
+  assert.ok(!body.includes('sekret-123') && !body.includes('سري') && !body.includes('محادثة'));
+  assert.equal(j.headline.length, 2); assert.equal(j.headline[0].label, 'المحادثات'); assert.equal(j.headline[1].unit, '%');
+  assert.deepEqual(j.outcomes.map((x) => [x.name, x.count]), [['وجد ما يريد', 200], ['لم يجد', 50]]);
+  assert.equal(j.top_recommended[0].name, 'بيبي جوي'); assert.equal(j.top_recommended[0].count, 40); assert.equal(j.top_added_to_cart[0].count, 7);
+  assert.equal(j.needs_met[0].name, 'حليب'); assert.equal(j.needs_not_served[0].count, 12);
+  assert.equal(j.daily.length, 1); assert.equal(j.daily[0].added_to_cart, 3); assert.equal(j.tracking_note, 'ملاحظة التتبع');
+  __clearMemo(); await get(env, '/api/chat-management?days=9999'); assert.equal(seen.u, 'https://search.internal/report/management?days=90');   // سقف 90 يوماً
+  __clearMemo(); status = 401; assert.equal((await (await get(env, '/api/chat-management')).json()).error, 'bad_key');
+  __clearMemo(); status = 404; assert.equal((await (await get(env, '/api/chat-management')).json()).error, 'not_ready');
+  __clearMemo(); status = 200; assert.equal((await (await get({ ...env, REPORT_KEY: undefined }, '/api/chat-management')).json()).error, 'not_configured');
+  assert.equal((await worker.fetch(new Request('https://x.test/api/chat-management'), env)).status, 401);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json(); __clearMemo();
+  assert.equal((await worker.fetch(new Request('https://x.test/api/chat-management', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
+});
