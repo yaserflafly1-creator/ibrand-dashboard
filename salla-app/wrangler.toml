@@ -33,6 +33,8 @@ SALLA_API_BASE = "https://api.salla.dev/admin/v2"
 SALLA_TOKEN_URL = "https://accounts.salla.sa/oauth2/token"
 SALLA_INTROSPECT_URL = "https://api.salla.dev/exchange-authority/v1/introspect"
 BACKFILL_DAYS = "760"
+# أقدم يوم يُحفظ في الأرشيف (ثابت: سنة 2025 كاملة تبقى دائماً مهما مرّت الأيام)
+BACKFILL_FROM = "2025-01-01"
 # عدد الأيام الأخيرة التي نحلّل فيها حملات الطلبات (طلب تفاصيل لكل طلب)
 CAMPAIGN_DAYS = "90"
 # 40 مناسبة للخطة المجانية (حد 50 نداءً خارجياً لكل تشغيل)، وارفعها إلى 900 في الخطة المدفوعة

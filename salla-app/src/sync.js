@@ -219,7 +219,8 @@ export async function syncMerchant(env, merchant, ctxBase, now = Date.now()) {
   const today = riyadhDay(now);
   ctx.attrFloor = addDays(today, -(Number(env.CAMPAIGN_DAYS) || CAMPAIGN_DAYS_DEFAULT));
   ctx.custFloor = addDays(today, -(Number(env.CUST_DAYS) || 120));
-  const floor = addDays(today, -(Number(env.BACKFILL_DAYS) || 400));
+  const byDays = addDays(today, -(Number(env.BACKFILL_DAYS) || 400)), from = /^\d{4}-\d{2}-\d{2}$/.test(String(env.BACKFILL_FROM || '')) ? String(env.BACKFILL_FROM) : '';
+  const floor = from && from < byDays ? from : byDays;   // BACKFILL_FROM تاريخ ثابت للأرشيف (يبقى كما هو مع مرور الأيام)؛ نأخذ الأقدم بينه وبين نافذة الأيام
   state.ppd = state.ppd || 5;
   // تغيّر شكل الملخصات اليومية (v2: تفاصيل الملغية والمسترجعة): نعيد بناء الأرشيف كاملاً مرة واحدة
   if (state.schema !== SCHEMA) { state.schema = SCHEMA; state.backfillDone = false; state.backfillNext = null; state.resyncNext = addDays(today, -2); state.resyncLow = addDays(today, -30); state.deepAt = now; }

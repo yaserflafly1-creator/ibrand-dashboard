@@ -285,7 +285,7 @@ async function handleExport(req, env) {
     if (body instanceof Error) return text(body.message, 400);
     return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store' } });
   }
-  if (span > 800) return text('range too long', 400);
+  if (span > 1500) return text('range too long', 400);
   const body = await memo(`csv:${rec.merchant}:${report}:${from}:${to}`, to < riyadhDay(Date.now()) ? 600e3 : 120e3, async () => {
     await ensureSchema(env.DB);
     const rows = await rangeRows(env.DB, rec.merchant, from, to);
@@ -307,7 +307,7 @@ async function handleSummary(req, env) {
   let from = q.get('from'), to = q.get('to');
   if (from > to) [from, to] = [to, from];
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
-  if (days > 800) return json({ error: 'range too long' }, 400);
+  if (days > 1500) return json({ error: 'range too long' }, 400);
   const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(days - 1));
 
   // ذاكرة مؤقتة داخل الـ isolate للاستجابة (والمشاهدون والتحديث التلقائي يتشاركونها): الحساب ثقيل على معالج الخطة المجانية
@@ -347,7 +347,7 @@ async function handleBasket(req, env) {
   let from = q.get('from'), to = q.get('to');
   if (from > to) [from, to] = [to, from];
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
-  if (days > 800) return json({ error: 'range too long' }, 400);
+  if (days > 1500) return json({ error: 'range too long' }, 400);
   const ttl = to < riyadhDay(Date.now()) ? 600e3 : 60e3;
   const text = await memo(`basket:${ctx.merchant}:${from}:${to}`, ttl, async () => {
     await ensureSchema(env.DB);
@@ -432,7 +432,7 @@ async function handleCare(req, env) {
   if (!validRange(q)) return json({ error: 'bad range' }, 400);
   let from = q.get('from'), to = q.get('to');
   if (from > to) [from, to] = [to, from];
-  if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > 800) return json({ error: 'range too long' }, 400);
+  if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1 > 1500) return json({ error: 'range too long' }, 400);
   const ttl = to < riyadhDay(Date.now()) ? 600e3 : 90e3;
   const wantList = q.get('list') === '1' && !ctx.shared;   // قائمة الطلبات (رقم/تاريخ/حالة/قيمة) بلا بيانات عملاء؛ لتوكن سلة فقط
   try {
