@@ -45,6 +45,7 @@ button{cursor:pointer}
 .filters{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px}
 .seg{display:inline-flex;background:var(--pink-50);border:1px solid var(--border);border-radius:999px;padding:3px;gap:2px}
 .seg button{border:0;background:transparent;padding:7px 16px;border-radius:999px;color:var(--muted);font-weight:500;transition:.2s;white-space:nowrap}
+@media (max-width:640px){#quick{max-width:100%;overflow-x:auto;scrollbar-width:none}#quick::-webkit-scrollbar{display:none}#quick button{padding:7px 12px;flex:0 0 auto}}
 .seg button:hover{color:var(--pink-700)}
 .seg button.on{background:#fff;color:var(--pink-600);box-shadow:0 1px 4px rgba(219,39,119,.18);font-weight:600}
 .field{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:6px 14px;transition:.2s}
@@ -306,6 +307,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
       <button data-p="month" class="on">هذا الشهر</button>
       <button data-p="lastmonth">الشهر الماضي</button>
       <button data-p="year">هذه السنة</button>
+      <button data-p="lastyear">السنة الماضية</button>
     </div>
 
     <div class="field">
@@ -316,6 +318,7 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
         <option value="month" selected>مبيعات الشهر</option>
         <option value="lastmonth">مبيعات الشهر الماضي</option>
         <option value="year">مبيعات السنة</option>
+        <option value="lastyear">مبيعات السنة الماضية</option>
         <option value="custom">نطاق مخصص…</option>
       </select>
     </div>
@@ -410,6 +413,15 @@ body[data-tab="comp"] [data-tab]:not([data-tab="comp"]){display:none!important}
     <div class="chart-box" style="height:260px"><canvas id="mthChart" dir="ltr"></canvas></div>
     <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>الشهر</th><th>المبيعات</th><th>الطلبات</th><th class="mh">متوسط الطلب</th><th class="mh">الملغية</th><th>عن المتوسط</th></tr></thead><tbody id="mthRows"></tbody></table></div>
     <p class="period-note" id="mthNote" style="margin:10px 0 0"></p>
+  </section>
+
+  <section data-tab="overview" class="card panel sec" id="yoyPanel">
+    <div class="panel-h"><div><h2>مقارنة شهرية: السنة مقابل السنة الماضية</h2><p id="yoySub">كل شهر مع نظيره في السنة السابقة · لا تتأثر بفلتر التاريخ</p></div>
+      <select id="yoyYear" title="السنة" style="padding:8px 12px;border:1px solid var(--border);border-radius:12px;font:inherit"></select></div>
+    <div class="mini-kpis" id="yoyKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+    <div class="chart-box" style="height:260px"><canvas id="yoyChart" dir="ltr"></canvas></div>
+    <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>الشهر</th><th id="yoyHp">مبيعات السابقة</th><th id="yoyHc">مبيعات الحالية</th><th>التغير</th><th class="mh">طلبات السابقة</th><th class="mh">طلبات الحالية</th><th class="mh">التغير</th><th class="mh">متوسط الطلب (سابقة → حالية)</th></tr></thead><tbody id="yoyRows"></tbody></table></div>
+    <p class="period-note" id="yoyNote" style="margin:10px 0 0"></p>
   </section>
 
 
@@ -780,6 +792,7 @@ function rangeFor(preset){
   if(preset==='month') return [new Date(t.getFullYear(), t.getMonth(), 1), t];
   if(preset==='lastmonth') return [new Date(t.getFullYear(), t.getMonth()-1, 1), new Date(t.getFullYear(), t.getMonth(), 0)];
   if(preset==='year')  return [new Date(t.getFullYear(), 0, 1), t];
+  if(preset==='lastyear') return [new Date(t.getFullYear()-1, 0, 1), new Date(t.getFullYear()-1, 11, 31)];
   return [state.from, state.to];
 }
 
@@ -1398,6 +1411,47 @@ setTimeout(refreshTabs, 0);
 (function(){ let t = location.hash.slice(1); if(!TABS.includes(t)){ try{ t = localStorage.getItem('tab') || ''; }catch(e){ t = ''; } } setTab(t, true); })();
 
 /* ============ متوسط الشهور ============ */
+/* ============ مقارنة شهرية بين سنتين ============ */
+let yoyData = null, yoyChart = null, yoySeq = 0, yoyYear = new Date().getFullYear();
+function demoYoy(y){
+  const months = Array.from({length:12}, (_, i) => { const base = 90000 + ((i*37)%11)*9000; const mk = k => ({revenue:Math.round(base*k), orders:Math.round(base*k/200), units:Math.round(base*k/55), canceled:Math.round(base*k/4000), days:28});
+    return {n:i+1, prev: mk(1), cur: i <= new Date().getMonth() ? mk(.8 + (i%4)*.12) : null}; });
+  return {year:y, prev:y-1, months, completeMonths:new Date().getMonth(), generated_at:Date.now()};
+}
+async function loadYoy(force){
+  const seq = ++yoySeq;
+  try{ yoyData = LIVE ? await api('/api/yoy?year='+yoyYear) : demoYoy(yoyYear); }
+  catch(e){ if(e.status===401 && !SHARE) return; yoyData = null; }
+  if(seq !== yoySeq) return;
+  renderYoy();
+}
+const pctChange = (c, p) => p ? (c/p-1)*100 : null;
+const chgCell = d => d===null ? '—' : `<span style="color:${d>=0?'#16a34a':'#dc2626'};font-weight:700">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}%</span>`;
+function renderYoy(){
+  const D = yoyData, panel = $('#yoyPanel'); if(!panel) return;
+  const sel = $('#yoyYear'); if(!sel.options.length){ const t = new Date().getFullYear(); for(let y=t; y>=2025; y--) sel.add(new Option(`${y} مقابل ${y-1}`, y)); sel.value = String(yoyYear); }
+  if(!D){ $('#yoyKpis').innerHTML = ''; $('#yoyRows').innerHTML = '<tr><td colspan="8" class="empty">تعذّر تحميل المقارنة</td></tr>'; return; }
+  const y = D.year, p = D.prev, k = D.completeMonths, ms = D.months;
+  $('#yoyHp').textContent = `مبيعات ${p}`; $('#yoyHc').textContent = `مبيعات ${y}`;
+  const sum = (key, who, upTo) => ms.filter(m => m.n <= upTo && m[who]).reduce((a,m) => a + m[who][key], 0);
+  const sc = sum('revenue','cur',k), sp = sum('revenue','prev',k), oc = sum('orders','cur',k), op = sum('orders','prev',k);
+  $('#yoyKpis').innerHTML = k ? [
+    [money(sc)+' '+CURRENCY, `مبيعات ${y} (أول ${k} ${k<11?'أشهر':'شهراً'})`], [money(sp)+' '+CURRENCY, `نفس الأشهر ${p}`],
+    [chgCell(pctChange(sc,sp)), 'تغير المبيعات'], [chgCell(pctChange(oc,op)), 'تغير الطلبات']
+  ].map(([v,l]) => `<div class="mini"><b>${v}</b><span>${l}</span></div>`).join('') : '<div class="empty" style="grid-column:1/-1">لا توجد أشهر كاملة بعد في هذه السنة</div>';
+  $('#yoyRows').innerHTML = ms.map(m => { const c = m.cur, q = m.prev, aovC = c && c.orders ? c.revenue/c.orders : 0, aovP = q && q.orders ? q.revenue/q.orders : 0, partial = m.n > k && c;
+    return `<tr><td>${MONTHS[m.n-1]}${partial ? ' <small style="color:var(--muted)">(ناقص)</small>' : ''}</td><td>${q ? money(q.revenue) : '—'}</td><td>${c ? money(c.revenue) : '—'}</td><td>${c && q && !partial ? chgCell(pctChange(c.revenue,q.revenue)) : '—'}</td>
+      <td class="mh">${q ? fmt(q.orders) : '—'}</td><td class="mh">${c ? fmt(c.orders) : '—'}</td><td class="mh">${c && q && !partial ? chgCell(pctChange(c.orders,q.orders)) : '—'}</td><td class="mh">${aovP ? money(aovP) : '—'} → ${aovC ? money(aovC) : '—'}</td></tr>`; }).join('');
+  $('#yoyNote').textContent = `المبيعات = إجمالي الطلبات المكتملة والمشحونة في لوحتنا، وقد تختلف عن تقرير سلة. الأشهر غير الكاملة لا تدخل في نسب التغير. ${(ms.some(m => m.prev && m.prev.days < 25 && m.n<=12) ? 'بعض أشهر السنة السابقة أيامها ناقصة (لم يكتمل جلب التاريخ بعد).' : '')}`;
+  const data = {labels:ms.map(m => MONTHS[m.n-1]), datasets:[
+    {label:String(p), data:ms.map(m => m.prev ? m.prev.revenue : null), backgroundColor:'#f9a8d4', borderRadius:6, maxBarThickness:26},
+    {label:String(y), data:ms.map(m => m.cur ? m.cur.revenue : null), backgroundColor:'#db2777', borderRadius:6, maxBarThickness:26}]};
+  const opts = {responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false}, plugins:{legend:{position:'bottom', labels:{usePointStyle:true, boxWidth:8}}, tooltip:{rtl:true, textDirection:'rtl', callbacks:{label:c => `${c.dataset.label}: ${money(c.parsed.y)} ${CURRENCY}`}}},
+    scales:{x:{grid:{display:false}, ticks:{maxRotation:0, font:{size:11}}}, y:{beginAtZero:true, ticks:{maxTicksLimit:5, callback:v => v>=1000 ? (v/1000)+'K' : v}}}};
+  if(yoyChart){ yoyChart.data = data; yoyChart.options = opts; yoyChart.update(); } else yoyChart = new Chart($('#yoyChart'), {type:'bar', data, options:opts});
+}
+$('#yoyYear').addEventListener('change', e => { yoyYear = +e.target.value; loadYoy(true); });
+
 let mthData = null, mthChart = null, mthSeq = 0, mthAt = 0;
 function demoMonths(){
   const by = {}, cur = ymd(new Date()).slice(0,7);
@@ -1690,7 +1744,7 @@ async function update(){
   renderTop(cur);
   renderCategories(cur);
   loadBasket(from, to);
-  loadMonths();
+  loadMonths(); loadYoy();
   setTimeout(() => loadCx(from, to), 0);   // بعد اكتمال تحميل السكربت (قسم «كمل احتياجك» يُعرَّف في آخره)
   if(document.body.dataset.tab==='care') loadCare(from, to);
   renderBars('#payBars', cur.pay, PAY_AR); renderBars('#cityBars', cur.city); renderBars('#srcBars', cur.src, SRC_AR);

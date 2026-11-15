@@ -486,6 +486,23 @@ async function handleCare(req, env) {
   }
 }
 
+/* ---------- /api/yoy?year=2026: مقارنة كل شهر بنظيره في السنة السابقة (من الملخصات اليومية) ---------- */
+async function handleYoy(req, env) {
+  const ctx = await dataContext(req, env);
+  if (ctx.res) return ctx.res;
+  const today = riyadhDay(Date.now()), thisYear = Number(today.slice(0, 4));
+  const year = Math.min(thisYear, Math.max(2020, Math.floor(Number(new URL(req.url).searchParams.get('year'))) || thisYear));
+  const text = await memo(`yoy:${ctx.merchant}:${year}`, 120e3, async () => {
+    await ensureSchema(env.DB);
+    const rows = await monthlyStats(env.DB, ctx.merchant, `${year - 1}-01-01`, year === thisYear ? today : `${year}-12-31`);
+    const by = new Map(rows.map((r) => [r.m, r])), pick = (y, n) => { const r = by.get(`${y}-${String(n).padStart(2, '0')}`); return r ? { revenue: r2n(r.revenue), orders: r.orders, units: r.units, canceled: r.canceled, days: r.days } : null; };
+    const curMonth = Number(today.slice(5, 7));
+    const months = Array.from({ length: 12 }, (_, i) => ({ n: i + 1, prev: pick(year - 1, i + 1), cur: year === thisYear && i + 1 > curMonth ? null : pick(year, i + 1) }));
+    return JSON.stringify({ year, prev: year - 1, months, completeMonths: year === thisYear ? curMonth - 1 : 12, generated_at: Date.now() });
+  });
+  return new Response(text, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+}
+
 /* ---------- /api/chat-stats: أرقام «المساعد الذكي» من خدمة ibrand-search (GET /report/chat، نفس REPORT_KEY) ----------
    أرقام فقط بلا نصوص محادثات (اللوحة تُشارَك بروابط). نُمرّر الأرقام فقط ونُسطّح الحقول المتداخلة، فلا يصل أي نص حرّ من الخدمة للصفحة. */
 const flatNums = (o, pre = '', depth = 0, out = {}) => {
@@ -855,6 +872,7 @@ export default {
       if (pathname === '/api/months' && req.method === 'GET') return await handleMonths(req, env);
       if (pathname === '/api/search-gaps' && req.method === 'GET') return await handleSearchGaps(req, env);
       if (pathname === '/api/care-orders' && req.method === 'GET') return await handleCare(req, env);
+      if (pathname === '/api/yoy' && req.method === 'GET') return await handleYoy(req, env);
       if (pathname === '/api/chat-stats' && req.method === 'GET') return await handleChatStats(req, env);
       if (pathname === '/api/chat-management' && req.method === 'GET') return await handleChatManagement(req, env);
       if (pathname.startsWith('/api/competitors')) return await handleCompetitors(req, env);

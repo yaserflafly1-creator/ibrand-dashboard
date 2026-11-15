@@ -474,3 +474,20 @@ test('chat-management: whitelisted cards/lists only (no conversation text), days
   const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json(); __clearMemo();
   assert.equal((await worker.fetch(new Request('https://x.test/api/chat-management', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
 });
+
+test('yoy: each month vs the same month a year earlier; future months null; complete months count; share allowed', async () => {
+  const env = mkEnv(); mockFetch(good);
+  const y = Number(riyadhDay(Date.now()).slice(0, 4));
+  await seedDay(env, `${y - 1}-03-10`, [{ t: 100 }, { t: 50 }]); await seedDay(env, `${y - 1}-04-10`, [{ t: 70 }]);
+  await seedDay(env, `${y}-03-10`, [{ t: 300 }]);
+  const j = await (await get(env, '/api/yoy?year=' + y)).json();
+  assert.equal(j.year, y); assert.equal(j.prev, y - 1); assert.equal(j.months.length, 12);
+  assert.equal(j.months[2].prev.revenue, 150); assert.equal(j.months[2].prev.orders, 2); assert.equal(j.months[2].cur.revenue, 300);
+  assert.equal(j.months[3].prev.revenue, 70); assert.equal(j.months[0].prev, null);
+  const curMonth = Number(riyadhDay(Date.now()).slice(5, 7)); assert.equal(j.completeMonths, curMonth - 1);
+  if (curMonth < 12) assert.equal(j.months[11].cur, null);
+  assert.equal((await (await get(env, '/api/yoy?year=' + (y - 1))).json()).completeMonths, 12);
+  assert.equal((await worker.fetch(new Request('https://x.test/api/yoy'), env)).status, 401);
+  const c = await (await worker.fetch(new Request('https://x.test/api/share', { method: 'POST', body: '{}', ...auth }), env)).json();
+  assert.equal((await worker.fetch(new Request('https://x.test/api/yoy', { headers: { authorization: 'Share ' + c.id } }), env)).status, 200);
+});
